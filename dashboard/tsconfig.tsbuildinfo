@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/controlsview.tsx","./src/components/detailview.tsx","./src/components/icons.tsx","./src/components/liveview.tsx","./src/components/postmortemview.tsx","./src/lib/api.ts","./src/lib/format.ts","./src/lib/sample.ts","./src/lib/types.ts","./src/lib/ui.ts","./src/lib/ws.ts"],"version":"5.8.3"}

@@ -1,0 +1,13 @@
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /src
+COPY gradlew settings.gradle.kts build.gradle.kts ./
+COPY gradle ./gradle
+COPY contracts ./contracts
+COPY incident-svc ./incident-svc
+RUN ./gradlew :incident-svc:bootJar --no-daemon
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /src/incident-svc/build/libs/incident-svc-0.1.0-SNAPSHOT.jar /app/app.jar
+EXPOSE 8082
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

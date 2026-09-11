@@ -1,0 +1,26 @@
+{
+  "family": "aegis-simulator",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::REPLACE_ME_ACCOUNT:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "simulator",
+      "image": "REPLACE_ME_ACCOUNT.dkr.ecr.REPLACE_ME_REGION.amazonaws.com/aegis/simulator:latest",
+      "portMappings": [{ "containerPort": 8080, "protocol": "tcp" }],
+      "environment": [
+        { "name": "KAFKA_BOOTSTRAP_SERVERS", "value": "REPLACE_ME_MSK_BOOTSTRAP" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aegis-simulator",
+          "awslogs-region": "REPLACE_ME_REGION",
+          "awslogs-stream-prefix": "simulator"
+        }
+      }
+    }
+  ]
+}

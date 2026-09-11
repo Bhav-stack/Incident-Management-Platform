@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: ingest-svc
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ingest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false   # at-least-once: offsets commit only after processing
+    listener:
+      ack-mode: manual
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true  # no broker-side duplicates on retry
+        acks: all
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_INGEST_DB:aegis_ingest}
+    username: ${POSTGRES_USER:aegis}
+    password: ${POSTGRES_PASSWORD:aegis}
+  flyway:
+    enabled: true
+
+# Pipeline tuning — config-driven policy, never hard-coded.
+ingest:
+  dedup-ttl: 1h
+  buffer:
+    window: 5s          # hold events so out-of-order siblings arrive
+    grace: 15s          # drop events later than window + grace
+    flush-interval: 1s
+    max-queue-size: 1000
+  rule:
+    error-rate-threshold: 5.0
+    required-streaks: 2 # confirmation window: 2 consecutive breach samples
+    signal: error_rate
+    severity: SEV2
+
+# Observability: how often the Kafka lag gauge is sampled.
+metrics:
+  kafka-lag-interval: 15s
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

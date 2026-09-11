@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: simulator
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        # At-least-once with no duplicates on the broker: retries are
+        # idempotent and acks wait for all in-sync replicas.
+        enable.idempotence: true
+        acks: all
+
+simulator:
+  services:
+    - checkout-service
+    - payment-service
+    - search-service
+  metrics-interval: 5s
+  log-interval: 10s
+  health-interval: 10s
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

@@ -1,0 +1,106 @@
+/* ==========================================================================
+   Aegis Design Tokens. Canonical UI source of truth.
+
+   Apple-style light system. Mirrors the mockup (design/dashboard.html) and
+   is what the React dashboard consumes. Do not add colors that are not here;
+   if the palette changes, change it here first.
+
+   Status semantics (Apple system palette, soft tint on fill):
+     investigating   -> blue   (evidence gathering)
+     awaiting approval -> orange (human gate)
+     executing       -> teal   (action in flight)
+     verifying       -> cyan   (post-action verification)
+     resolved        -> green
+     rolled back     -> red
+
+   Severity semantics:
+     SEV1 -> red, SEV2 -> orange, SEV3 -> blue
+   ========================================================================== */
+
+:root {
+  /* ---- Surfaces ---- */
+  --color-bg: #f5f5f7;                  /* page background */
+  --color-surface: #ffffff;             /* cards, topbar */
+  --color-surface-muted: #f5f5f7;       /* chips, wells, row hover */
+  --color-hairline: rgba(0, 0, 0, 0.08);/* separators, card borders */
+
+  /* ---- Text ---- */
+  --color-text: #1d1d1f;
+  --color-text-secondary: #6e6e73;
+  --color-text-tertiary: #86868b;
+
+  /* ---- Accent (Apple blue; the only saturation in the UI) ---- */
+  --color-blue: #0071e3;
+  --color-blue-hover: #0077ed;
+  --color-blue-soft: rgba(0, 113, 227, 0.10);
+  --shadow-blue: 0 2px 8px rgba(0, 113, 227, 0.30);
+
+  /* ---- Status palette (Apple system colors) ---- */
+  --color-red: #ff3b30;
+  --color-red-soft: rgba(255, 59, 48, 0.10);
+  --color-orange: #ff9500;
+  --color-orange-soft: rgba(255, 149, 0, 0.12);
+  --color-orange-text: #c93400;         /* readable orange text on white */
+  --color-green: #34c759;
+  --color-green-soft: rgba(52, 199, 89, 0.13);
+  --color-teal: #30b0c7;
+  --color-teal-soft: rgba(48, 176, 199, 0.12);
+  --color-cyan: #32ade6;
+  --color-cyan-soft: rgba(50, 173, 230, 0.12);
+
+  /* ---- Typography ---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+               "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 11px;    /* labels, badges, captions (uppercase, +0.07em tracking) */
+  --text-sm: 12px;    /* secondary meta */
+  --text-md: 13px;    /* body, table cells */
+  --text-base: 14px;  /* default */
+  --text-lg: 18px;    /* card titles, action names */
+  --text-xl: 24px;    /* page headers */
+  --text-stat: 30px;  /* stat values (semibold, -0.02em tracking) */
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --tracking-label: 0.07em;
+
+  /* ---- Spacing (4px base) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  /* ---- Radii ---- */
+  --radius-sm: 7px;    /* chips, badges, segmented thumbs */
+  --radius-md: 12px;   /* buttons, wells, action history */
+  --radius-lg: 16px;   /* cards */
+  --radius-pill: 980px;/* kill-switch button, toggles */
+
+  /* ---- Shadows (never harsh; two-layer, low alpha) ---- */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 28px rgba(0, 0, 0, 0.07);
+  --shadow-soft: 0 1px 1px rgba(0, 0, 0, 0.03), 0 4px 14px rgba(0, 0, 0, 0.05);
+  --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.05);
+  --shadow-switch-thumb: 0 2px 6px rgba(0, 0, 0, 0.22);
+
+  /* ---- Effects ---- */
+  --blur-topbar: saturate(180%) blur(20px);   /* frosted top bar */
+
+  /* ---- Motion ---- */
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --duration-fast: 150ms;
+  --duration-med: 200ms;
+}
+
+/* ---- Reusable component recipes (reference for the React app) ---- */
+/* Card:        background var(--color-surface), radius var(--radius-lg),
+                shadow var(--shadow-card), border 1px var(--color-hairline) */
+/* Primary btn: background var(--color-blue), white text, weight 600,
+                radius var(--radius-md), shadow var(--shadow-blue),
+                hover var(--color-blue-hover) */
+/* Toggle:      49x30 track, on = var(--color-green) with white thumb
+                (26px, var(--shadow-switch-thumb)) */
+/* Badge:       tinted fill (e.g. var(--color-red-soft)) + strong color text,
+                radius var(--radius-sm), 11px mono, weight 700 */

@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: incident-svc
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: incident
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        acks: all
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:aegis}
+    username: ${POSTGRES_USER:aegis}
+    password: ${POSTGRES_PASSWORD:aegis}
+  jpa:
+    hibernate:
+      ddl-auto: validate   # schema is owned by Flyway, never by Hibernate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+# Agent layer (Phase 4). mode=rule runs the deterministic proposer;
+# mode=agent runs the tool-calling loop. fake=true uses the scripted LLM
+# (CI and demos without an API key).
+agent:
+  mode: ${AGENT_MODE:rule}
+  model: ${AGENT_MODEL:gpt-4o-mini}
+  api-key: ${OPENAI_API_KEY:}
+  base-url: ${AGENT_BASE_URL:https://api.openai.com/v1}
+  fake: ${AGENT_FAKE_LLM:false}
+  max-rounds: 8
+  temperature: 0.1
+
+# Autonomy policy (Phase 5a): thresholds between proposal and action.
+# Runtime toggles (shadow mode, LOW auto-approve) live in Redis and can be
+# flipped from the dashboard Controls view.
+policy:
+  confidence-minimums:
+    clear_cache: 0.70
+    restart_instance: 0.70
+    scale_replicas: 0.80
+    rollback_deploy: 0.90
+    kill_instance: 0.90
+  min-evidence-signals: 2
+  auto-approve-low: false
+
+# Replay harness ground truth (Phase 5b): demo scenarios the shadow
+# evaluator scores the proposer against. no_action is the negative class.
+replay:
+  scenarios:
+    - {service: checkout-service, signal: error_rate, expected-action: restart_instance}
+    - {service: payment-service, signal: cpu_saturation, expected-action: scale_replicas}
+    - {service: search-service, signal: deploy_regression, expected-action: rollback_deploy}
+    - {service: inventory-service, signal: cache_stampede, expected-action: clear_cache}
+    - {service: auth-service, signal: error_rate, expected-action: restart_instance}
+    - {service: catalog-service, signal: error_rate, expected-action: no_action}
+
+# Services the Controls view can toggle individually.
+controls:
+  services: checkout-service,payment-service,search-service,auth-service,inventory-service
+
+# Approval gate tuning
+proposal:
+  ttl: 5m              # approval window; expiry escalates, never auto-approves
+  sweep-interval: 30s
+
+# Action execution and verification
+simulator:
+  base-url: ${SIMULATOR_BASE_URL:http://localhost:8080}
+action:
+  verify-window: 60s       # how long metrics may take to recover
+  verify-poll-interval: 10s
+  verify-threshold: 5.0    # must match ingest rule error-rate-threshold
+  lock-ttl: 5m
+
+# Observability: how often the Kafka lag gauge is sampled.
+metrics:
+  kafka-lag-interval: 15s
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

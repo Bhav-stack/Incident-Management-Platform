@@ -1,0 +1,36 @@
+{
+  "family": "aegis-incident",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::REPLACE_ME_ACCOUNT:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "incident",
+      "image": "REPLACE_ME_ACCOUNT.dkr.ecr.REPLACE_ME_REGION.amazonaws.com/aegis/incident:latest",
+      "portMappings": [{ "containerPort": 8082, "protocol": "tcp" }],
+      "environment": [
+        { "name": "KAFKA_BOOTSTRAP_SERVERS", "value": "REPLACE_ME_MSK_BOOTSTRAP" },
+        { "name": "POSTGRES_HOST", "value": "REPLACE_ME_RDS_ENDPOINT" },
+        { "name": "POSTGRES_PORT", "value": "5432" },
+        { "name": "POSTGRES_DB", "value": "aegis" },
+        { "name": "POSTGRES_USER", "value": "aegis" },
+        { "name": "POSTGRES_PASSWORD", "value": "REPLACE_ME" },
+        { "name": "REDIS_HOST", "value": "REPLACE_ME_ELASTICACHE_ENDPOINT" },
+        { "name": "REDIS_PORT", "value": "6379" },
+        { "name": "SIMULATOR_BASE_URL", "value": "http://aegis-simulator:8080" },
+        { "name": "AGENT_MODE", "value": "rule" },
+        { "name": "AGENT_FAKE_LLM", "value": "true" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aegis-incident",
+          "awslogs-region": "REPLACE_ME_REGION",
+          "awslogs-stream-prefix": "incident"
+        }
+      }
+    }
+  ]
+}

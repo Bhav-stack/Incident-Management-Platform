@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy · Aegis</title>
+<meta name="description" content="Privacy policy for the Aegis incident management demo project.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html">
+      <span class="mark">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M10 2 16.5 5v4.6c0 3.6-2.6 6.4-6.5 8.4-3.9-2-6.5-4.8-6.5-8.4V5L10 2Z" fill="currentColor"/>
+        </svg>
+      </span>
+      Aegis
+    </a>
+    <nav class="nav">
+      <a href="index.html">Home</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </nav>
+  </div>
+</header>
+
+<main class="legal">
+  <div class="legal-card">
+  <h1>Privacy Policy</h1>
+  <p class="meta">Last updated: September 8, 2026</p>
+
+  <h3>1. What this project is</h3>
+  <p>
+    Aegis is a demo project that simulates application failures and automated
+    incident recovery. It is built to demonstrate systems design and is not a
+    commercial service. This page describes what the project does with data
+    when you run it yourself or view this site.
+  </p>
+
+  <h3>2. Data collection on this site</h3>
+  <p>
+    This site does not use analytics, tracking scripts, cookies for marketing,
+    or third-party embeds. It does not collect names, email addresses, or any
+    personal information. No accounts are offered and none are required.
+  </p>
+
+  <h3>3. Data in the demo itself</h3>
+  <p>
+    When you run the project locally, the simulator generates synthetic
+    telemetry (metrics, logs, and health events for made-up services such as
+    <code>checkout-service</code>). All data is fictional, is generated on
+    your own machine, and stays on your own machine. The services persist
+    incident history to your local PostgreSQL instance and ephemeral state to
+    your local Redis instance.
+  </p>
+
+  <h3>4. Logs</h3>
+  <p>
+    Application logs may be written by the services while they run. These are
+    standard operational logs (startup, errors, processed event counts) and
+    are not transmitted anywhere. The LLM agent, if enabled, sends synthetic
+    incident evidence to the configured model provider. Do not feed real
+    customer data into the demo if that matters to you.
+  </p>
+
+  <h3>5. Sharing</h3>
+  <p>
+    No data is sold, rented, or shared with third parties, because no user
+    data is collected in the first place.
+  </p>
+
+  <h3>6. Changes</h3>
+  <p>
+    If this policy changes, the date at the top of this page will be updated.
+    Because this is a demo project, the simplest way to understand the current
+    behavior is to read the source code, which is the authoritative
+    description of what the project does.
+  </p>
+  </div>
+</main>
+
+<footer class="footer">
+  <div>
+    <a href="index.html">Home</a>
+    <a href="privacy.html">Privacy Policy</a>
+    <a href="terms.html">Terms &amp; Conditions</a>
+  </div>
+  <div style="margin-top:8px">Aegis is a demo project. It collects no data.</div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "family": "aegis-ingest",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::REPLACE_ME_ACCOUNT:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "ingest",
+      "image": "REPLACE_ME_ACCOUNT.dkr.ecr.REPLACE_ME_REGION.amazonaws.com/aegis/ingest:latest",
+      "portMappings": [{ "containerPort": 8081, "protocol": "tcp" }],
+      "environment": [
+        { "name": "KAFKA_BOOTSTRAP_SERVERS", "value": "REPLACE_ME_MSK_BOOTSTRAP" },
+        { "name": "POSTGRES_HOST", "value": "REPLACE_ME_RDS_ENDPOINT" },
+        { "name": "POSTGRES_PORT", "value": "5432" },
+        { "name": "POSTGRES_DB", "value": "aegis_ingest" },
+        { "name": "POSTGRES_USER", "value": "aegis" },
+        { "name": "POSTGRES_PASSWORD", "value": "REPLACE_ME" },
+        { "name": "REDIS_HOST", "value": "REPLACE_ME_ELASTICACHE_ENDPOINT" },
+        { "name": "REDIS_PORT", "value": "6379" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aegis-ingest",
+          "awslogs-region": "REPLACE_ME_REGION",
+          "awslogs-stream-prefix": "ingest"
+        }
+      }
+    }
+  ]
+}

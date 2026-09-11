@@ -1,0 +1,26 @@
+{
+  "family": "aegis-dashboard",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::REPLACE_ME_ACCOUNT:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "dashboard",
+      "image": "REPLACE_ME_ACCOUNT.dkr.ecr.REPLACE_ME_REGION.amazonaws.com/aegis/dashboard:latest",
+      "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
+      "environment": [
+        { "name": "INCIDENT_SVC", "value": "aegis-incident:8082" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/aegis-dashboard",
+          "awslogs-region": "REPLACE_ME_REGION",
+          "awslogs-stream-prefix": "dashboard"
+        }
+      }
+    }
+  ]
+}
