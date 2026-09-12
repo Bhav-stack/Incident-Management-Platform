@@ -31,7 +31,19 @@ SERVICE="checkout-service"
 API="http://localhost:8082/api"
 SIM="http://localhost:8080/api"
 
-command -v python3 >/dev/null || { echo "python3 is required for JSON parsing" >&2; exit 1; }
+# Control-plane authentication: the services require X-API-Key on /api when
+# AEGIS_API_KEY is set for them. Export the same value before running this
+# script and every call below carries it; leave it unset for a keyless local
+# stack (the services then log a warning and serve /api openly).
+AUTH=()
+if [ -n "${AEGIS_API_KEY:-}" ]; then
+  AUTH=(-H "X-API-Key: ${AEGIS_API_KEY}")
+  echo "control-plane API key: using AEGIS_API_KEY from the environment"
+fi
+
+# JSON parsing uses node: the dashboard already requires it, and it is
+# present on the development machines and GitHub runners, unlike python3.
+command -v node >/dev/null || { echo "node is required for JSON parsing" >&2; exit 1; }
 
 log() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok()  { printf '\033[1;32mOK\033[0m  %s\n' "$*"; }
@@ -64,19 +76,30 @@ kafka_dump() { # topic label
     --from-beginning --timeout-ms 4000 2>/dev/null | tail -n +2 || true
 }
 
-py() { python3 -c "$1"; }
+# json <expression>  — reads a JSON document on stdin, evaluates the
+# expression with the parsed value bound to `data`, prints the result.
+json() {
+  node -e "
+    let raw = '';
+    process.stdin.on('data', chunk => raw += chunk);
+    process.stdin.on('end', () => {
+      const data = JSON.parse(raw);
+      console.log($1);
+    });
+  "
+}
 
 incident_status() {
-  curl -sf "$API/incidents" | py "import sys,json; incs=json.load(sys.stdin); print(incs[0]['status'] if incs else 'NONE')"
+  curl -sf "${AUTH[@]}" "$API/incidents" | json "data.length ? data[0].status : 'NONE'"
 }
 first_incident_id() {
-  curl -sf "$API/incidents" | py "import sys,json; print(json.load(sys.stdin)[0]['externalId'])"
+  curl -sf "${AUTH[@]}" "$API/incidents" | json "data[0].externalId"
 }
 first_proposal_id() { # incidentId
-  curl -sf "$API/incidents/$1/proposals" | py "import sys,json; print(json.load(sys.stdin)[0]['externalId'])"
+  curl -sf "${AUTH[@]}" "$API/incidents/$1/proposals" | json "data[0].externalId"
 }
 timeline_types() { # incidentId
-  curl -sf "$API/incidents/$1/events" | py "import sys,json; print(','.join(e['eventType'] for e in json.load(sys.stdin)))"
+  curl -sf "${AUTH[@]}" "$API/incidents/$1/events" | json "data.map(event => event.eventType).join(',')"
 }
 
 await_status() { # expected timeout_seconds
@@ -124,12 +147,12 @@ wait_http "http://localhost:8081/actuator/health" "ingest-svc"
 wait_http "http://localhost:8082/actuator/health" "incident-svc"
 
 log "scenario: error spike on $SERVICE (errorRate 8.5, 120s)"
-curl -sf -X POST "$SIM/scenarios/error-spike" \
+curl -sf "${AUTH[@]}" -X POST "$SIM/scenarios/error-spike" \
   -H 'Content-Type: application/json' \
   -d "{\"service\":\"$SERVICE\",\"errorRate\":8.5,\"durationSeconds\":120}"
 if [ "$MODE" = "stubborn" ]; then
   log "scenario: stubborn failure on $SERVICE (recovery actions will not heal it)"
-  curl -sf -X POST "$SIM/scenarios/stubborn" \
+  curl -sf "${AUTH[@]}" -X POST "$SIM/scenarios/stubborn" \
     -H 'Content-Type: application/json' \
     -d "{\"service\":\"$SERVICE\",\"durationSeconds\":120}"
 fi
@@ -144,7 +167,7 @@ kafka_dump "incidents"   "incident state changes so far"
 
 log "approving the proposal"
 PROPOSAL_ID="$(first_proposal_id "$INCIDENT_ID")"
-curl -sf -X POST "$API/proposals/$PROPOSAL_ID/approve" \
+curl -sf "${AUTH[@]}" -X POST "$API/proposals/$PROPOSAL_ID/approve" \
   -H 'Content-Type: application/json' -d '{"approver":"e2e"}'
 ok "proposal $PROPOSAL_ID approved -> action.commands"
 

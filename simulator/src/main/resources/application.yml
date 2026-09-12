@@ -21,6 +21,13 @@ simulator:
   log-interval: 10s
   health-interval: 10s
 
+# Control-plane authentication: every /api request must carry X-API-Key when
+# this is set (incident-svc sends the same value). Empty disables the filter
+# for local development and tests, with a startup warning.
+aegis:
+  security:
+    api-key: ${AEGIS_API_KEY:}
+
 server:
   port: 8080
 

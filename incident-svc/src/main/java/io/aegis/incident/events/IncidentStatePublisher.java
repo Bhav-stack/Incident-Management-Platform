@@ -56,6 +56,6 @@ public class IncidentStatePublisher {
         } catch (Exception e) {
             log.error("Could not serialize incident state {}: {}", event.eventId(), e.getMessage());
         }
-        broadcaster.incident(incident, event);
+        broadcaster.incident(event);
     }
 }

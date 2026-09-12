@@ -86,6 +86,23 @@ class ActionVerifierTest {
     }
 
     @Test
+    void oneUnreachableTargetDoesNotBlockTheOtherIncidents() {
+        Action broken = verifyingAction(Instant.now().plus(Duration.ofSeconds(60)));
+        Action healthy = verifyingAction(Instant.now().plus(Duration.ofSeconds(60)));
+        when(actions.findByStatus(ActionStatus.VERIFYING)).thenReturn(List.of(broken, healthy));
+        when(simulator.status("checkout-service"))
+                .thenThrow(new IllegalStateException("connection refused"))
+                .thenReturn(new SimulatorClient.ServiceStatus(1.0, 2, "v2.4.0", null));
+
+        verifier.verifyPending();
+
+        assertEquals(ActionStatus.VERIFYING, broken.getStatus(),
+                "the unreachable action is retried on the next poll");
+        assertEquals(ActionStatus.VERIFIED, healthy.getStatus(),
+                "the other in-flight action is still verified");
+    }
+
+    @Test
     void deadlineExceededTriggersAutomaticRollback() {
         Action action = verifyingAction(Instant.now().minusSeconds(10));
         when(actions.findByStatus(ActionStatus.VERIFYING)).thenReturn(List.of(action));

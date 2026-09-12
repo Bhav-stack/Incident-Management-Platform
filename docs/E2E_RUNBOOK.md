@@ -22,8 +22,6 @@ error-spike -> raw.events -> ingest-svc (dedup, order, 2-window confirm)
 ## 1. Automated verification (Testcontainers)
 
 ```bash
-./scripts/e2e-verify.sh --help   # n/a
-# Instead:
 ./gradlew :incident-svc:test --tests '*IncidentLifecycleE2ETest*'
 ```
 
@@ -46,7 +44,13 @@ Skipped automatically when Docker is unavailable (`@Testcontainers(disabledWitho
 ## 2. Full stack verification (script)
 
 Requirements: Docker with compose v2, JDK 17+ (Gradle auto-provisions the
-JDK 21 toolchain), `python3` (used only to parse JSON from the REST API).
+JDK 21 toolchain), `node` (used only to parse JSON from the REST API; the
+dashboard needs it anyway).
+
+Authentication: with `AEGIS_API_KEY` exported, incident-svc and the simulator
+reject any `/api` call that does not carry `X-API-Key`. The script reads the
+same variable and sends the header for you. Leave it unset for a keyless local
+stack; the services then log a warning and serve `/api` openly.
 
 ```bash
 make reset          # clean slate: wipes compose volumes (fresh DBs)
@@ -69,6 +73,9 @@ The script tears the stack down on exit (`docker compose down -v`). Add
 | Stubborn path | `incidents` | `ACTION_FAILED`, `ROLLBACK_SKIPPED`, `ESCALATED` in the timeline; status `RESOLVED` (rolled back) |
 
 ### Manual walkthrough (instead of the script)
+
+Add `-H "X-API-Key: $AEGIS_API_KEY"` to every `/api` call below if the services
+run with authentication enabled.
 
 ```bash
 docker compose up -d

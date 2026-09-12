@@ -57,9 +57,11 @@ public class RollbackEngine {
 
     /**
      * Only reachable after the incident has been moved to FAILED; the state
-     * machine refuses ROLLING_BACK from any other state.
+     * machine refuses ROLLING_BACK from any other state. Deliberately not
+     * annotated: it runs inside {@link #failAndRollback}'s transaction (a
+     * self-invocation, which Spring proxies cannot intercept anyway), so the
+     * rollback action and the incident transition commit together.
      */
-    @Transactional
     private void rollback(Action failedAction, String reason) {
         Incident incident = failedAction.getIncident();
         incident.transitionTo(IncidentStatus.ROLLING_BACK);

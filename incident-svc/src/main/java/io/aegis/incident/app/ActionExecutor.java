@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * The only execution authority in the platform. The agent can never reach
@@ -69,6 +70,17 @@ public class ActionExecutor {
         this.properties = properties;
         this.killSwitches = killSwitches;
         this.metrics = metrics;
+    }
+
+    /**
+     * True once this command has a durable {@code actions} row, which is the
+     * only proof that it was executed. The consumer uses it to tell a real
+     * duplicate (another delivery of a completed command) from a redelivery
+     * after a rolled-back attempt.
+     */
+    @Transactional(readOnly = true)
+    public boolean alreadyExecuted(UUID commandId) {
+        return actions.existsByCommandId(commandId);
     }
 
     @Transactional

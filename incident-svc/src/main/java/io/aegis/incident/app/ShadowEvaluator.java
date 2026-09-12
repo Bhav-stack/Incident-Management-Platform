@@ -103,11 +103,12 @@ public class ShadowEvaluator {
     @Transactional(readOnly = true)
     public Stats stats() {
         long[] counts = evaluations.verdictCounts();
-        long correct = counts[0];
+        long tp = counts[0];
         long fp = counts[1];
         long fn = counts[2];
-        long total = counts[3];
-        long tp = correct;
+        long tn = counts[3];
+        long total = counts[4];
+        long correct = tp + tn;
         double precision = tp + fp == 0 ? 0.0 : (double) tp / (tp + fp);
         double recall = tp + fn == 0 ? 0.0 : (double) tp / (tp + fn);
         return new Stats(total, correct, tp, fp, fn, precision, recall);

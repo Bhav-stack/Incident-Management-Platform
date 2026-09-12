@@ -13,10 +13,13 @@ build/
 .classpath
 .project
 .settings/
+# Eclipse/VS Code Java compiler output (.vscode sets java.project.outputPath)
+bin/
 
 # Node (dashboard)
 node_modules/
 dist/
+*.tsbuildinfo
 
 # Environment
 .env

@@ -42,8 +42,10 @@ ingest:
     signal: error_rate
     severity: SEV2
 
-# Observability: how often the Kafka lag gauge is sampled.
+# Observability: the consumer group's lag is sampled from the broker for
+# these topics, so the gauge is meaningful even with no active consumer.
 metrics:
+  kafka-lag-topics: raw.events
   kafka-lag-interval: 15s
 
 server:

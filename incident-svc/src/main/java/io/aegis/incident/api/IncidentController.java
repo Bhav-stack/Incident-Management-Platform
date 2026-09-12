@@ -42,8 +42,9 @@ public class IncidentController {
     }
 
     /**
-     * Scaffold-only convenience to seed incidents by hand; replaced by the
-     * ingest -> anomaly -> incident pipeline in Phase 2.
+     * Manual incident creation: opens an incident without waiting for the
+     * ingest pipeline, which is what demos and the WebSocket end-to-end test
+     * use. The automated path is still anomaly -> incident.
      */
     public record OpenRequest(
             @NotBlank String service,

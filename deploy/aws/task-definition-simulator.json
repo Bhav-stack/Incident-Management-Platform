@@ -13,6 +13,12 @@
       "environment": [
         { "name": "KAFKA_BOOTSTRAP_SERVERS", "value": "REPLACE_ME_MSK_BOOTSTRAP" }
       ],
+      "secrets": [
+        {
+          "name": "AEGIS_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_ME_REGION:REPLACE_ME_ACCOUNT:secret:aegis/api-key"
+        }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

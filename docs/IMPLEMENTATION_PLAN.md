@@ -5,6 +5,15 @@ Kafka semantics) and [`design/dashboard.html`](../design/dashboard.html) (UI
 mockup). This document is the build order: repo structure, tech stack per
 module, and granular steps with acceptance criteria.
 
+> **As-built note.** This plan was written before implementation. What shipped
+> is `contracts`, `simulator`, `ingest-svc`, `incident-svc`, and `dashboard`:
+> the agent loop and the action executor live inside `incident-svc` as packages
+> rather than as separate `agent-svc`/`action-svc` deployables, because the
+> seam between them is the Kafka topic set and one deployable per layer added
+> operational cost without adding a boundary (see `ARCHITECTURE.md` §2). Phase
+> names here map to the phase checkboxes in the README. The pre-ship audit in
+> [`AUDIT.md`](AUDIT.md) records what was verified and what is still open.
+
 ---
 
 ## 1. Target Repository Structure

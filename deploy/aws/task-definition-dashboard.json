@@ -11,7 +11,7 @@
       "image": "REPLACE_ME_ACCOUNT.dkr.ecr.REPLACE_ME_REGION.amazonaws.com/aegis/dashboard:latest",
       "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
       "environment": [
-        { "name": "INCIDENT_SVC", "value": "aegis-incident:8082" }
+        { "name": "AEGIS_API_KEY", "value": "REPLACE_ME" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

@@ -15,8 +15,10 @@ state streams to a React dashboard over WebSocket.
 
 | Doc | What it is |
 |---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design: components, data model, agent loop, safety model, Kafka semantics, interview cheat sheet |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design: components, data model, agent loop, safety model, Kafka semantics, interview cheat sheet |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | Build order: repo structure, tech stack per module, granular steps with acceptance criteria |
+| [`docs/E2E_RUNBOOK.md`](docs/E2E_RUNBOOK.md) | Full-stack walkthrough with the expected payload on every Kafka topic and troubleshooting |
+| [`docs/AUDIT.md`](docs/AUDIT.md) | Pre-ship audit: defects found and fixed, security posture, residual risks |
 | [`design/dashboard.html`](design/dashboard.html) | UI design mockup (live feed, agent trace, approval card, post-mortem, controls) |
 | [`dashboard/`](dashboard/) | React + Vite + TypeScript dashboard: STOMP/SockJS live feed, approval gate, sample-data fallback |
 
@@ -38,18 +40,18 @@ Docker Compose (→ ECS Fargate stretch)
 - [x] **Phase 6 — Observability:** Micrometer counters per service, Prometheus + Grafana in compose with a provisioned dashboard
 - [x] **Phase 7 — CI/CD + AWS artifacts:** GitHub Actions (backend + dashboard), container images, ECS Fargate task definitions + runbook
 
-## Quickstart (Phase 0)
+## Quickstart
 
 Requires JDK 17+ (Gradle auto-provisions the JDK 21 toolchain) and Docker.
 
 ```bash
-make up                              # docker compose: kafka, postgres, redis
+make up                              # docker compose: kafka, postgres, redis, prometheus, grafana
 ./gradlew :simulator:bootRun &       # emits metrics/logs/health -> raw.events
-./gradlew :ingest-svc:bootRun &      # consumes, normalizes, counts (dedup next)
+./gradlew :ingest-svc:bootRun &      # consumes, normalizes, dedups, detects anomalies
 ./gradlew :incident-svc:bootRun &    # state machine + REST on :8082
 ```
 
-Break a service and watch the pipeline (Phase 1):
+Break a service and watch the pipeline:
 
 ```bash
 curl -X POST localhost:8080/api/scenarios/error-spike \
@@ -57,6 +59,9 @@ curl -X POST localhost:8080/api/scenarios/error-spike \
   -d '{"service":"checkout-service","errorRate":8.5,"durationSeconds":60}'
 curl localhost:8081/api/stats   # ingest event counters
 # anomalies land on the `anomalies` topic after ~7s (buffer + 2-window confirm)
+
+# with AEGIS_API_KEY set, add -H "X-API-Key: $AEGIS_API_KEY" to every /api call
+curl -H "X-API-Key: $AEGIS_API_KEY" localhost:8082/api/incidents
 ```
 
 ## Dashboard (Phase 3)
@@ -134,6 +139,26 @@ approval gate, and recovery outcomes.
 - AWS: `deploy/aws/` — ECS Fargate task definitions and a runbook (MSK, RDS,
   ElastiCache, ALB). Deployment needs your AWS account.
 
+## Security
+
+The control plane is not open by default in a deployment.
+
+- **API key on `/api`** of incident-svc and the simulator: set `AEGIS_API_KEY`
+  and every control call (approve, reject, kill switches, replay, fault
+  injection, action execution) requires the `X-API-Key` header. Unset means
+  authentication is disabled and both services log a warning at startup, which
+  is the local-development and test path.
+- **The key stays server-side.** The browser never holds it: the nginx image
+  (`deploy/nginx.conf`) and the Vite dev proxy inject the header on the
+  requests they forward.
+- **Read-only surface left open:** `/actuator/health` and
+  `/actuator/prometheus` (health checks and scraping), and the WebSocket feed
+  `/ws/**`. See [`docs/AUDIT.md`](docs/AUDIT.md) for why, and what to do about
+  the WebSocket before exposing the dashboard publicly.
+- **Containers run as a non-root user** (`deploy/Dockerfile.*`), Grafana
+  anonymous access is read-only, and secrets are expected from the environment
+  (`.env` is gitignored; `.env.example` documents every variable).
+
 ## End-to-end verification (needs Docker)
 
 ```bash
@@ -147,6 +172,5 @@ make reset
 ```
 
 Details, expected topic payloads, and troubleshooting: [`docs/E2E_RUNBOOK.md`](docs/E2E_RUNBOOK.md).
-
-Later phases: `make demo` (scripted failure scenario end-to-end) and
-`make replay` (agent evaluation harness).
+Set `AEGIS_API_KEY` in the shell to run the script against a stack with
+authentication enabled; it then sends the header on every call.

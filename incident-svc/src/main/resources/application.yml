@@ -73,6 +73,13 @@ proposal:
   ttl: 5m              # approval window; expiry escalates, never auto-approves
   sweep-interval: 30s
 
+# Control-plane authentication. Every /api request must carry X-API-Key when
+# this is set; leaving it empty disables the filter (local dev and tests) and
+# logs a startup warning. The same value is sent to the simulator.
+aegis:
+  security:
+    api-key: ${AEGIS_API_KEY:}
+
 # Action execution and verification
 simulator:
   base-url: ${SIMULATOR_BASE_URL:http://localhost:8080}
@@ -82,8 +89,10 @@ action:
   verify-threshold: 5.0    # must match ingest rule error-rate-threshold
   lock-ttl: 5m
 
-# Observability: how often the Kafka lag gauge is sampled.
+# Observability: the consumer group's lag is sampled from the broker for
+# these topics, so the gauge is meaningful even with no active consumer.
 metrics:
+  kafka-lag-topics: anomalies,action.commands
   kafka-lag-interval: 15s
 
 server:

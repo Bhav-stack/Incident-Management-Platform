@@ -25,12 +25,11 @@ class IncidentBroadcasterTest {
     void incidentStateGoesToTopicIncidentsWithTheKafkaPayloadShape() {
         SimpMessagingTemplate template = mock(SimpMessagingTemplate.class);
         IncidentBroadcaster broadcaster = new IncidentBroadcaster(template);
-        Incident incident = new Incident("checkout-service", Severity.SEV2, "error_rate 8.5");
         IncidentStateEvent event = new IncidentStateEvent(
                 UUID.randomUUID(), UUID.randomUUID(), "checkout-service", "SEV2",
                 "AWAITING_APPROVAL", "error_rate 8.5", Instant.now(), Instant.now());
 
-        broadcaster.incident(incident, event);
+        broadcaster.incident(event);
 
         // Same object the Kafka topic carries: one payload shape for the UI.
         verify(template).convertAndSend(eq("/topic/incidents"), eq(event));

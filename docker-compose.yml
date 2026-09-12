@@ -62,6 +62,11 @@ services:
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    # The Spring services run on the host, so Prometheus reaches them through
+    # this name. Docker Desktop provides it out of the box; on Linux the
+    # host-gateway mapping is what makes it resolve.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - kafka
       - postgres
@@ -72,8 +77,10 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Anonymous access is read-only. The admin login is what can change
+      # dashboards and data sources, so it must not be the anonymous role.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
     volumes:

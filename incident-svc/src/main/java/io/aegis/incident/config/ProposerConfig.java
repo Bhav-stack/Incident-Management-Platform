@@ -38,16 +38,25 @@ public class ProposerConfig {
             - Be honest about uncertainty in the confidence value.
             """;
 
+    /**
+     * The model client and the loop are built only when agent mode is asked
+     * for. They are deliberately not beans: nothing else needs them, and
+     * declaring them as beans would make a missing API key a <i>startup</i>
+     * failure even in the default rule-based mode.
+     */
     @Bean
     public Proposer proposer(AgentProperties properties, SimulatorClient simulator) {
-        if ("agent".equalsIgnoreCase(properties.mode())) {
-            return new AgentProposer(toolCallingAgent(llmClient(properties), simulator, properties));
+        if (!"agent".equalsIgnoreCase(properties.mode())) {
+            return new RuleBasedProposer();
         }
-        return new RuleBasedProposer();
+        LlmClient llm = llmClient(properties);
+        ToolCallingAgent agent = new ToolCallingAgent(llm,
+                InvestigationTools.forSimulator(simulator),
+                properties.maxRounds(), SYSTEM_PROMPT);
+        return new AgentProposer(agent);
     }
 
-    @Bean
-    public LlmClient llmClient(AgentProperties properties) {
+    private LlmClient llmClient(AgentProperties properties) {
         if (properties.fake()) {
             return FakeLlmClient.investigatingAgent();
         }
@@ -57,13 +66,5 @@ public class ProposerConfig {
         }
         return new OpenAiLlmClient(properties.baseUrl(), properties.apiKey(),
                 properties.model(), properties.temperature());
-    }
-
-    @Bean
-    public ToolCallingAgent toolCallingAgent(LlmClient llm, SimulatorClient simulator,
-                                             AgentProperties properties) {
-        return new ToolCallingAgent(llm,
-                InvestigationTools.forSimulator(simulator),
-                properties.maxRounds(), SYSTEM_PROMPT);
     }
 }

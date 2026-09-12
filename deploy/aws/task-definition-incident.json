@@ -16,12 +16,25 @@
         { "name": "POSTGRES_PORT", "value": "5432" },
         { "name": "POSTGRES_DB", "value": "aegis" },
         { "name": "POSTGRES_USER", "value": "aegis" },
-        { "name": "POSTGRES_PASSWORD", "value": "REPLACE_ME" },
         { "name": "REDIS_HOST", "value": "REPLACE_ME_ELASTICACHE_ENDPOINT" },
         { "name": "REDIS_PORT", "value": "6379" },
         { "name": "SIMULATOR_BASE_URL", "value": "http://aegis-simulator:8080" },
         { "name": "AGENT_MODE", "value": "rule" },
         { "name": "AGENT_FAKE_LLM", "value": "true" }
+      ],
+      "secrets": [
+        {
+          "name": "POSTGRES_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_ME_REGION:REPLACE_ME_ACCOUNT:secret:aegis/postgres-password"
+        },
+        {
+          "name": "AEGIS_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_ME_REGION:REPLACE_ME_ACCOUNT:secret:aegis/api-key"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_ME_REGION:REPLACE_ME_ACCOUNT:secret:aegis/openai-api-key"
+        }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

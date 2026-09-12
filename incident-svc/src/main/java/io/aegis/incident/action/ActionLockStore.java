@@ -31,4 +31,14 @@ public class ActionLockStore {
                 KEY_PREFIX + commandId, "1", properties.lockTtl());
         return Boolean.TRUE.equals(acquired);
     }
+
+    /**
+     * Gives the claim back after a failed attempt so the redelivered command
+     * can be retried instead of being skipped until the lock TTL expires.
+     * Without this, one transient failure (simulator or database blip) would
+     * silently strand an approved command forever.
+     */
+    public void release(UUID commandId) {
+        redis.delete(KEY_PREFIX + commandId);
+    }
 }

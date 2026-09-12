@@ -79,4 +79,38 @@ class ShadowEvaluatorTest {
 
         verify(repo).save(any(Evaluation.class));
     }
+
+    @Test
+    void statsReadTheQueryColumnsAsTpFpFnTnTotal() {
+        EvaluationRepository repo = mock(EvaluationRepository.class);
+        // 1 tp, 2 fp, 3 fn, 4 tn, 10 rows: precision 1/3, recall 1/4, correct 5.
+        when(repo.verdictCounts()).thenReturn(new long[] {1, 2, 3, 4, 10});
+        ShadowEvaluator evaluator = new ShadowEvaluator(mock(Proposer.class), repo,
+                new ReplayProperties(List.of()));
+
+        ShadowEvaluator.Stats stats = evaluator.stats();
+
+        assertEquals(1, stats.tp());
+        assertEquals(2, stats.fp());
+        assertEquals(3, stats.fn());
+        assertEquals(5, stats.correct());
+        assertEquals(10, stats.total());
+        assertEquals(1.0 / 3.0, stats.precision(), 1e-9);
+        assertEquals(0.25, stats.recall(), 1e-9);
+    }
+
+    @Test
+    void correctNoActionVerdictsDoNotInflatePrecisionOrRecall() {
+        EvaluationRepository repo = mock(EvaluationRepository.class);
+        // 4 tp, no fp, 1 fn, 1 tn: precision is 1.0 and recall 0.8, not 5/6.
+        when(repo.verdictCounts()).thenReturn(new long[] {4, 0, 1, 1, 6});
+        ShadowEvaluator evaluator = new ShadowEvaluator(mock(Proposer.class), repo,
+                new ReplayProperties(List.of()));
+
+        ShadowEvaluator.Stats stats = evaluator.stats();
+
+        assertEquals(1.0, stats.precision(), 1e-9);
+        assertEquals(0.8, stats.recall(), 1e-9);
+        assertEquals(5, stats.correct());
+    }
 }

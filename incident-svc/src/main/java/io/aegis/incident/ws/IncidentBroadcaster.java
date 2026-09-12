@@ -1,7 +1,6 @@
 package io.aegis.incident.ws;
 
 import io.aegis.contracts.events.IncidentStateEvent;
-import io.aegis.incident.domain.Incident;
 import io.aegis.incident.domain.Proposal;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
@@ -25,7 +24,7 @@ public class IncidentBroadcaster {
         this.template = template;
     }
 
-    public void incident(Incident incident, IncidentStateEvent event) {
+    public void incident(IncidentStateEvent event) {
         template.convertAndSend("/topic/incidents", event);
     }
 

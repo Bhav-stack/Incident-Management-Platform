@@ -16,6 +16,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.Map;
@@ -56,24 +58,40 @@ public class ActionVerifier {
     @Transactional
     public void verifyPending() {
         for (Action action : actions.findByStatus(ActionStatus.VERIFYING)) {
-            Incident incident = action.getIncident();
-            double rate = simulator.status(incident.getService()).errorRate();
-            if (rate < properties.verifyThreshold()) {
-                metrics.counter("aegis_actions_verified").increment();
-                action.markVerified();
-                incident.transitionTo(IncidentStatus.RESOLVED);
-                events.save(new IncidentEvent(incident, "VERIFIED", Map.of(
-                        "actionId", action.getExternalId().toString(),
-                        "finalErrorRate", rate)));
-                publisher.publish(incident);
-                log.info("Action {} verified, incident {} resolved (error_rate {})",
-                        action.getExternalId(), incident.getExternalId(), rate);
-            } else if (Instant.now().isAfter(action.getVerifyDeadline())) {
-                metrics.counter("aegis_actions_verification_failed").increment();
-                rollback.failAndRollback(action, incident,
-                        "metrics did not recover within " + properties.verifyWindow().toSeconds()
-                                + "s (last error_rate " + rate + ")");
+            try {
+                verify(action);
+            } catch (Exception e) {
+                // One unreachable target must not stop the other incidents
+                // in flight from being verified. The action stays VERIFYING
+                // and is retried on the next poll.
+                log.warn("Verification poll failed for action {}: {} (retrying next cycle)",
+                        action.getExternalId(), e.getMessage());
+                if (TransactionSynchronizationManager.isActualTransactionActive()
+                        && TransactionAspectSupport.currentTransactionStatus().isRollbackOnly()) {
+                    throw e;  // the transaction is already poisoned; let it roll back
+                }
             }
+        }
+    }
+
+    private void verify(Action action) {
+        Incident incident = action.getIncident();
+        double rate = simulator.status(incident.getService()).errorRate();
+        if (rate < properties.verifyThreshold()) {
+            metrics.counter("aegis_actions_verified").increment();
+            action.markVerified();
+            incident.transitionTo(IncidentStatus.RESOLVED);
+            events.save(new IncidentEvent(incident, "VERIFIED", Map.of(
+                    "actionId", action.getExternalId().toString(),
+                    "finalErrorRate", rate)));
+            publisher.publish(incident);
+            log.info("Action {} verified, incident {} resolved (error_rate {})",
+                    action.getExternalId(), incident.getExternalId(), rate);
+        } else if (Instant.now().isAfter(action.getVerifyDeadline())) {
+            metrics.counter("aegis_actions_verification_failed").increment();
+            rollback.failAndRollback(action, incident,
+                    "metrics did not recover within " + properties.verifyWindow().toSeconds()
+                            + "s (last error_rate " + rate + ")");
         }
     }
 }

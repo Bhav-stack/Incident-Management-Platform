@@ -13,10 +13,21 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
- * Consumes {@code action.commands} at-least-once. The Redis lock
- * ({@link ActionLockStore}) makes concurrent redeliveries harmless; the
- * executor's proposal guard and the unique command index are the durable
- * backstops.
+ * Consumes {@code action.commands} at-least-once and decides what a delivery
+ * means:
+ *
+ * <ul>
+ *   <li><b>Lock acquired</b> — this worker owns the command; execute it.</li>
+ *   <li><b>Lock held, command already has an {@code actions} row</b> — a real
+ *       duplicate, acknowledge it.</li>
+ *   <li><b>Lock held, no row</b> — either another worker is executing it right
+ *       now or a previous attempt failed and rolled back. Do not acknowledge:
+ *       leave it for redelivery so an approved command is never lost.</li>
+ * </ul>
+ *
+ * <p>The claim is released when execution throws, so the retry path cannot be
+ * blocked until the lock TTL expires. The durable backstops remain the unique
+ * {@code actions.command_id} index and the proposal status guard.
  */
 @Component
 public class ActionCommandConsumer {
@@ -36,17 +47,34 @@ public class ActionCommandConsumer {
 
     @KafkaListener(topics = Topics.ACTION_COMMANDS)
     public void consume(String json, Acknowledgment ack) {
+        ActionCommandEvent command;
         try {
-            ActionCommandEvent command = mapper.readValue(json, ActionCommandEvent.class);
-            if (locks.acquire(command.commandId())) {
-                executor.execute(command);
-            }
-            ack.acknowledge();
+            command = mapper.readValue(json, ActionCommandEvent.class);
         } catch (JsonProcessingException | IllegalArgumentException e) {
+            // Poison message: acknowledge so the partition keeps moving.
             log.warn("Skipping invalid command: {}", e.getMessage());
             ack.acknowledge();
+            return;
+        }
+
+        if (!locks.acquire(command.commandId())) {
+            if (executor.alreadyExecuted(command.commandId())) {
+                log.info("Command {} already executed, acknowledging duplicate",
+                        command.commandId());
+                ack.acknowledge();
+                return;
+            }
+            throw new IllegalStateException(
+                    "command " + command.commandId() + " is claimed but not executed");
+        }
+
+        try {
+            executor.execute(command);
+            ack.acknowledge();
         } catch (Exception e) {
-            log.error("Processing failed, leaving unacked for redelivery", e);
+            locks.release(command.commandId());
+            log.error("Command {} failed, releasing the claim for redelivery",
+                    command.commandId(), e);
             throw new RuntimeException(e);
         }
     }

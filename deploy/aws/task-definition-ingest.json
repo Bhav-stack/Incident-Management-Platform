@@ -16,9 +16,14 @@
         { "name": "POSTGRES_PORT", "value": "5432" },
         { "name": "POSTGRES_DB", "value": "aegis_ingest" },
         { "name": "POSTGRES_USER", "value": "aegis" },
-        { "name": "POSTGRES_PASSWORD", "value": "REPLACE_ME" },
         { "name": "REDIS_HOST", "value": "REPLACE_ME_ELASTICACHE_ENDPOINT" },
         { "name": "REDIS_PORT", "value": "6379" }
+      ],
+      "secrets": [
+        {
+          "name": "POSTGRES_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_ME_REGION:REPLACE_ME_ACCOUNT:secret:aegis/postgres-password"
+        }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

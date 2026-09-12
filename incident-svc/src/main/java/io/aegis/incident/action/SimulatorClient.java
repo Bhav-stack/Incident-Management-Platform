@@ -1,8 +1,10 @@
 package io.aegis.incident.action;
 
+import io.aegis.incident.security.ApiKeyFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
@@ -18,8 +20,14 @@ public class SimulatorClient {
 
     private final RestClient rest;
 
-    public SimulatorClient(@Value("${simulator.base-url:http://localhost:8080}") String baseUrl) {
-        this.rest = RestClient.builder().baseUrl(baseUrl).build();
+    public SimulatorClient(@Value("${simulator.base-url:http://localhost:8080}") String baseUrl,
+                           @Value("${aegis.security.api-key:}") String apiKey) {
+        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+        if (StringUtils.hasText(apiKey)) {
+            // The simulator guards its API with the same shared secret.
+            builder = builder.defaultHeader(ApiKeyFilter.HEADER, apiKey.trim());
+        }
+        this.rest = builder.build();
     }
 
     public ServiceStatus status(String service) {
