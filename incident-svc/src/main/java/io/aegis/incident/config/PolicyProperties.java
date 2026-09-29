@@ -2,6 +2,7 @@ package io.aegis.incident.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -14,12 +15,14 @@ import java.util.Map;
  * @param confidenceMinimums action type -> minimum confidence for action
  * @param minEvidenceSignals evidence entries a proposal must carry
  * @param autoApproveLow     default for the LOW-risk auto-approve toggle
+ * @param twoPersonLevels    risk levels that need two distinct operators
  */
 @ConfigurationProperties(prefix = "policy")
 public record PolicyProperties(
         Map<String, Double> confidenceMinimums,
         int minEvidenceSignals,
-        boolean autoApproveLow
+        boolean autoApproveLow,
+        List<String> twoPersonLevels
 ) {
 
     public PolicyProperties {
@@ -32,5 +35,6 @@ public record PolicyProperties(
                         "kill_instance", 0.90)
                 : confidenceMinimums;
         minEvidenceSignals = minEvidenceSignals <= 0 ? 2 : minEvidenceSignals;
+        twoPersonLevels = twoPersonLevels == null ? List.of("HIGH") : List.copyOf(twoPersonLevels);
     }
 }

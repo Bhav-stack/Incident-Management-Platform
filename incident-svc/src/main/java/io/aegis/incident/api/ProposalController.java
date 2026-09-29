@@ -2,12 +2,11 @@ package io.aegis.incident.api;
 
 import io.aegis.incident.app.ProposalService;
 import io.aegis.incident.domain.Proposal;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
+import io.aegis.incident.security.ControlPlaneAuthFilter;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -23,9 +22,6 @@ public class ProposalController {
 
     public ProposalController(ProposalService proposals) {
         this.proposals = proposals;
-    }
-
-    public record DecisionRequest(@NotBlank String approver) {
     }
 
     @GetMapping("/incidents/{incidentId}/proposals")
@@ -50,19 +46,27 @@ public class ProposalController {
         response.put("createdAt", proposal.getCreatedAt());
         response.put("decidedAt", proposal.getDecidedAt());
         response.put("decidedBy", proposal.getDecidedBy());
+        response.put("approvals", proposal.getApprovals());
+        response.put("approvalsRequired", proposal.getApprovalsRequired());
 
         return response;
     }
 
+    /**
+     * Approves as the authenticated caller. The approver is not a request
+     * field: it comes from the credential — a token subject or an operator key
+     * — so a caller cannot sign off as somebody else. High-risk actions need
+     * two distinct operators, so the proposal may come back still PENDING with
+     * one recorded approval.
+     */
     @PostMapping("/proposals/{proposalId}/approve")
-    public Proposal approve(@PathVariable UUID proposalId,
-                            @Valid @RequestBody DecisionRequest request) {
-        return proposals.approve(proposalId, request.approver());
+    public Proposal approve(@PathVariable UUID proposalId, HttpServletRequest request) {
+        return proposals.approve(proposalId, ControlPlaneAuthFilter.identityOf(request));
     }
 
+    /** A single verified operator can reject: a veto needs one signature. */
     @PostMapping("/proposals/{proposalId}/reject")
-    public Proposal reject(@PathVariable UUID proposalId,
-                           @Valid @RequestBody DecisionRequest request) {
-        return proposals.reject(proposalId, request.approver());
+    public Proposal reject(@PathVariable UUID proposalId, HttpServletRequest request) {
+        return proposals.reject(proposalId, ControlPlaneAuthFilter.identityOf(request));
     }
 }

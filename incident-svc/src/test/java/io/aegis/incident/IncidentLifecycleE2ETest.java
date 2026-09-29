@@ -11,15 +11,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -51,9 +48,13 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class IncidentLifecycleE2ETest {
 
+    // org.testcontainers.kafka.KafkaContainer is the container built for the
+    // apache/kafka image this project runs everywhere else. The older
+    // org.testcontainers.containers.KafkaContainer targets Confluent images
+    // and refuses apache/kafka outright.
     @Container
-    static final KafkaContainer KAFKA = new KafkaContainer(DockerImageName.parse("apache/kafka:3.7.0"))
-            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "true");
+    static final KafkaContainer KAFKA =
+            new KafkaContainer(DockerImageName.parse("apache/kafka:3.7.0"));
 
     @Container
     static final GenericContainer<?> REDIS =
@@ -94,8 +95,14 @@ class IncidentLifecycleE2ETest {
 
     @Test
     void approvalLeadsToExecutionVerificationAndResolution() throws Exception {
+        // Two reads of the target's health, in order: the executor captures
+        // the pre-execution state to build the undo plan (still broken), then
+        // the verifier polls and finds the restart worked. Stubbing a single
+        // unrecovered state here would drive the rollback path instead, which
+        // is what stubbornFailureIsRolledBackAndEscalated covers.
         when(simulator.status(anyString()))
-                .thenReturn(new SimulatorClient.ServiceStatus(8.0, 2, "v2.4.0", null));
+                .thenReturn(new SimulatorClient.ServiceStatus(8.0, 2, "v2.4.0", null))
+                .thenReturn(new SimulatorClient.ServiceStatus(0.4, 2, "v2.4.0", null));
         when(simulator.execute(anyString(), anyString(), any()))
                 .thenReturn(new SimulatorClient.ExecuteResult(true, "instance restarted"));
 
@@ -104,16 +111,20 @@ class IncidentLifecycleE2ETest {
         String incidentId = awaitIncidentStatus("AWAITING_APPROVAL");
         String proposalId = firstProposalId(incidentId);
 
-        postJson("/api/proposals/" + proposalId + "/approve", Map.of("approver", "e2e"));
+        post("/api/proposals/" + proposalId + "/approve");
 
         awaitIncidentStatus("RESOLVED");
         List<String> timeline = timelineTypes(incidentId);
-        // Full Phase 2 loop, in order: anomaly -> incident -> proposal ->
-        // approve -> execute -> verify -> resolve.
-        assertTrue(timeline.indexOf("ACTION_EXECUTED") >= 0
-                        && timeline.indexOf("VERIFYING") > timeline.indexOf("ACTION_EXECUTED")
-                        && timeline.indexOf("VERIFIED") > timeline.indexOf("VERIFYING"),
-                "timeline must show execute -> verifying -> verified in order: " + timeline);
+        // Full loop, in order: anomaly -> incident -> proposal -> approve ->
+        // execute -> verify -> resolve. VERIFYING is an incident *state*
+        // streamed to the dashboard, not a timeline entry, so the timeline
+        // proves the action ran and was verified; RESOLVED is only reachable
+        // from VERIFYING (see IncidentStatus), so awaiting it proves the
+        // verification step ran rather than being skipped.
+        int executed = timeline.indexOf("ACTION_EXECUTED");
+        int verified = timeline.indexOf("VERIFIED");
+        assertTrue(executed >= 0 && verified > executed,
+                "timeline must show the action execute then verify: " + timeline);
         assertEquals("EXECUTED", proposalStatus(proposalId),
                 "approved proposal must be marked EXECUTED");
     }
@@ -131,7 +142,7 @@ class IncidentLifecycleE2ETest {
         String incidentId = awaitIncidentStatus("AWAITING_APPROVAL");
         String proposalId = firstProposalId(incidentId);
 
-        postJson("/api/proposals/" + proposalId + "/approve", Map.of("approver", "e2e"));
+        post("/api/proposals/" + proposalId + "/approve");
 
         awaitIncidentStatus("RESOLVED");   // resolved through the rollback path
         List<String> timeline = timelineTypes(incidentId);
@@ -149,10 +160,12 @@ class IncidentLifecycleE2ETest {
         producer.send(Topics.ANOMALIES, service, mapper.writeValueAsString(anomaly)).get();
     }
 
-    private void postJson(String path, Object body) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        rest.postForEntity(path, new HttpEntity<>(body, headers), String.class);
+    /**
+     * Posts with an empty body: the approver is no longer a request field, it
+     * is the verified identity behind the caller's credential.
+     */
+    private void post(String path) {
+        rest.postForEntity(path, null, String.class);
     }
 
     private JsonNode getJson(String path) throws Exception {

@@ -69,7 +69,8 @@ public class ControlsController {
                 "shadowMode", policy.shadowMode(),
                 "autoApproveLow", policy.autoApproveLow(),
                 "confidenceMinimums", policy.confidenceMinimums(),
-                "minEvidenceSignals", policy.minEvidenceSignals());
+                "minEvidenceSignals", policy.minEvidenceSignals(),
+                "twoPersonLevels", policy.twoPersonLevels());
     }
 
     @PutMapping("/policy/shadow-mode")

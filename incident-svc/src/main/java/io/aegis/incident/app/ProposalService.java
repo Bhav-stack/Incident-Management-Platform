@@ -14,6 +14,7 @@ import io.aegis.incident.events.ActionCommandPublisher;
 import io.aegis.incident.events.IncidentStatePublisher;
 import io.aegis.incident.repo.IncidentEventRepository;
 import io.aegis.incident.repo.ProposalRepository;
+import io.aegis.incident.security.OperatorRegistry;
 import io.aegis.incident.rules.ProposalDraft;
 import io.aegis.incident.rules.Proposer;
 import io.aegis.incident.ws.IncidentBroadcaster;
@@ -118,6 +119,9 @@ public class ProposalService {
         }
 
         Proposal proposal = new Proposal(incident, draft.get());
+        // Capture the signature requirement from the policy in force now, so a
+        // later policy change cannot rewrite what this proposal needed.
+        proposal.setApprovalsRequired(policy.requiredApprovals(draft.get().riskLevel()));
         proposals.save(proposal);
         metrics.counter("aegis_proposals_created").increment();
         incident.transitionTo(IncidentStatus.PROPOSAL);
@@ -127,8 +131,8 @@ public class ProposalService {
                 "actionType", draft.get().actionType(),
                 "riskLevel", draft.get().riskLevel(),
                 "confidence", draft.get().confidence())));
-        if (decision.verdict() == AutonomyPolicy.Verdict.AUTO_APPROVE) {
-            proposal.approve("policy:auto");
+        if (decision.verdict() == AutonomyPolicy.Verdict.AUTO_APPROVE
+                && proposal.approve("policy:auto", Map.of("method", "policy"))) {
             metrics.counter("aegis_proposals_auto_approved").increment();
             events.save(new IncidentEvent(incident, "PROPOSAL_AUTO_APPROVED", Map.of(
                     "proposalId", proposal.getExternalId().toString(),
@@ -140,18 +144,71 @@ public class ProposalService {
         return Optional.of(proposal);
     }
 
+    /**
+     * Records an approval from a verified operator identity. High-risk actions
+     * need two distinct operators: the first call records a signature and
+     * leaves the proposal at the gate, the second (different operator) releases
+     * the command. The same operator cannot supply both.
+     *
+     * @param identity verified identity from the caller's credential, never
+     *                 from the request body
+     */
     @Transactional
-    public Proposal approve(UUID externalId, String approver) {
+    public Proposal approve(UUID externalId, OperatorRegistry.Identity identity) {
         Proposal proposal = get(externalId);
+        if (proposal.getApprovalsRequired() > 1 && !identity.attributable()) {
+            // The shared dashboard key authenticates a client, not a person.
+            // Letting it count towards a two-person rule would reduce the rule
+            // to one human plus one service credential.
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Proposal " + proposal.getExternalId() + " is " + proposal.getRiskLevel()
+                            + " risk and needs two named operators; this request was authenticated "
+                            + "as the shared client identity. Configure aegis.security.operators "
+                            + "and approve with an operator key.");
+        }
+        String operator = identity.name();
+        // The signature is stored with the attestation that backs it: which
+        // kind of credential proved the identity, and for a token, which
+        // signed document it was.
+        Map<String, String> attestation = identity.attestation();
+        boolean released;
         try {
-            proposal.approve(approver);
+            released = proposal.approve(operator, attestation);
         } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
+
+        Incident incident = proposal.getIncident();
+        if (!released) {
+            metrics.counter("aegis_proposals_approval_recorded").increment();
+            Map<String, Object> detail = new java.util.LinkedHashMap<>();
+            detail.put("proposalId", proposal.getExternalId().toString());
+            detail.put("approver", operator);
+            detail.put("authMethod", identity.method());
+            if (identity.tokenId() != null) {
+                detail.put("tokenId", identity.tokenId());
+            }
+            detail.put("approvals", proposal.approvalOperators());
+            detail.put("required", proposal.getApprovalsRequired());
+            events.save(new IncidentEvent(incident, "APPROVAL_RECORDED", detail));
+            log.info("Proposal {} has {} of {} approvals, waiting for a second operator "
+                            + "(first signed via {})",
+                    proposal.getExternalId(), proposal.approvalOperators().size(),
+                    proposal.getApprovalsRequired(), identity.method());
+            broadcaster.proposal(proposal);
+            return proposal;
+        }
+
         metrics.counter("aegis_proposals_approved").increment();
-        events.save(new IncidentEvent(proposal.getIncident(), "PROPOSAL_APPROVED", Map.of(
-                "proposalId", proposal.getExternalId().toString(),
-                "approver", approver)));
+        Map<String, Object> approvedDetail = new java.util.LinkedHashMap<>();
+        approvedDetail.put("proposalId", proposal.getExternalId().toString());
+        approvedDetail.put("approver", operator);
+        approvedDetail.put("authMethod", identity.method());
+        if (identity.tokenId() != null) {
+            approvedDetail.put("tokenId", identity.tokenId());
+        }
+        approvedDetail.put("approvals", proposal.approvalOperators());
+        events.save(new IncidentEvent(incident, "PROPOSAL_APPROVED", approvedDetail));
         publishCommandAfterCommit(proposal);
         broadcaster.proposal(proposal);
         return proposal;
@@ -186,8 +243,9 @@ public class ProposalService {
     }
 
     @Transactional
-    public Proposal reject(UUID externalId, String approver) {
+    public Proposal reject(UUID externalId, OperatorRegistry.Identity identity) {
         Proposal proposal = get(externalId);
+        String approver = identity.name();
         try {
             proposal.reject(approver);
         } catch (IllegalStateException e) {
@@ -198,7 +256,8 @@ public class ProposalService {
         incident.transitionTo(IncidentStatus.REJECTED);
         events.save(new IncidentEvent(incident, "PROPOSAL_REJECTED", Map.of(
                 "proposalId", proposal.getExternalId().toString(),
-                "approver", approver)));
+                "approver", approver,
+                "authMethod", identity.method())));
         publisher.publish(incident);
         broadcaster.proposal(proposal);
         return proposal;

@@ -15,7 +15,9 @@ import org.springframework.messaging.simp.stomp.StompHeaders;
 import org.springframework.messaging.simp.stomp.StompSession;
 import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.springframework.web.socket.sockjs.client.SockJsClient;
@@ -28,7 +30,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.lang.reflect.Type;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -37,14 +38,16 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Proves the Phase 3 wire-up end to end: a STOMP client over SockJS (the
- * browser fallback path) subscribes to {@code /topic/incidents} and receives
- * the state event for an incident opened over REST. Requires Docker; skipped
- * automatically when unavailable.
+ * Proves the live feed end to end over SockJS (the browser fallback path): a
+ * subscribed dashboard receives the state event for an incident opened over
+ * REST, and a client that cannot present a ticket never gets a session at all.
+ *
+ * <p>Requires Docker; skipped automatically when unavailable.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -85,14 +88,10 @@ class WsEndToEndTest {
     }
 
     @Test
-    void incidentStateArrivesOverSockJsStomp() throws Exception {
-        WebSocketStompClient client = new WebSocketStompClient(sockJsClient());
-        client.setMessageConverter(new MappingJackson2MessageConverter());
+    void incidentStateArrivesOverSockJsStompWithATicket() throws Exception {
+        WebSocketStompClient client = stompClient();
 
-        int port = Integer.parseInt(rest.getRootUri().replaceAll("^.*:(\\d+)$", "$1"));
-
-        String url = "http://localhost:" + port + "/ws";
-        session = client.connectAsync(url, new StompSessionHandlerAdapter() {}).get(10, TimeUnit.SECONDS);
+        session = connect(client, ticket());
         assertTrue(session.isConnected(), "STOMP session must be established over SockJS");
 
         BlockingQueue<JsonNode> received = new LinkedBlockingQueue<>();
@@ -108,23 +107,90 @@ class WsEndToEndTest {
             }
         });
 
-        // Opening an incident over REST publishes a state change, which must
-        // appear on /topic/incidents for every subscribed dashboard.
+        // The SUBSCRIBE frame is sent asynchronously, so an event published in
+        // the same instant can be delivered before the broker has registered
+        // the subscription and is then lost. Open incidents until one arrives
+        // rather than sleeping a fixed amount and hoping the race went well.
         String summary = "ws-e2e-" + UUID.randomUUID().toString().substring(0, 8);
-        var opened = rest.postForObject("/api/incidents",
-                new OpenRequest("ws-e2e-service", Severity.SEV3, summary), Map.class);
+        JsonNode frame = null;
+        Map<?, ?> opened = null;
+        long deadline = System.nanoTime() + 30_000_000_000L;
+        while (frame == null && System.nanoTime() < deadline) {
+            opened = rest.postForObject("/api/incidents",
+                    new OpenRequest("ws-e2e-service", Severity.SEV3, summary), Map.class);
+            frame = received.poll(3, TimeUnit.SECONDS);
+        }
 
-        JsonNode frame = received.poll(15, TimeUnit.SECONDS);
-        assertNotNull(frame, "no STOMP frame received within 15s");
+        assertNotNull(frame, "no STOMP frame received within 30s");
         assertEquals(summary, frame.get("summary").asText());
         assertEquals("ws-e2e-service", frame.get("service").asText());
         assertNotNull(frame.get("incidentId").asText());
-        assertNotNull(opened);
+        assertNotNull(opened, "the incident must be accepted over REST");
     }
 
-    private SockJsClient sockJsClient() {
+    @Test
+    void aConnectionWithoutATicketIsRefused() {
+        assertFalse(didConnect(stompClient(), null),
+                "the incident feed must not be readable without a ticket");
+    }
+
+    @Test
+    void aTicketCannotBeRedeemedTwice() {
+        WebSocketStompClient client = stompClient();
+        String once = ticket();
+
+        assertTrue(didConnect(client, once), "the first use of a fresh ticket must succeed");
+        assertFalse(didConnect(client, once), "a spent ticket must not open a second session");
+    }
+
+    /**
+     * Connects the way the dashboard does. The explicit handshake-headers and
+     * connect-headers overload is deliberate: the shorter
+     * {@code connectAsync(url, handler, connectHeaders)} call resolves to the
+     * {@code Object...} URI-variable overload instead, which silently drops the
+     * connect headers and makes every connection look unauthenticated.
+     */
+    private StompSession connect(WebSocketStompClient client, String ticket) throws Exception {
+        StompHeaders connectHeaders = new StompHeaders();
+        connectHeaders.add(WsAuthConfig.TICKET_HEADER, ticket);
+        return client.connectAsync(url(), new WebSocketHttpHeaders(), connectHeaders,
+                new StompSessionHandlerAdapter() {}).get(10, TimeUnit.SECONDS);
+    }
+
+    /** True when a session was established; a rejected CONNECT is an error. */
+    private boolean didConnect(WebSocketStompClient client, String ticket) {
+        StompSession established = null;
+        try {
+            established = connect(client, ticket);
+            return established.isConnected();
+        } catch (Exception expected) {
+            return false;
+        } finally {
+            if (established != null && established.isConnected()) {
+                established.disconnect();
+            }
+        }
+    }
+
+    // --- helpers ------------------------------------------------------------
+
+    /** Issues a ticket the way the dashboard proxy does, through the same API. */
+    private String ticket() {
+        Map<?, ?> body = rest.postForObject("/api/ws-ticket", null, Map.class);
+        assertNotNull(body, "the ticket endpoint must answer");
+        return (String) body.get("ticket");
+    }
+
+    private String url() {
+        int port = Integer.parseInt(rest.getRootUri().replaceAll("^.*:(\\d+)$", "$1"));
+        return "http://localhost:" + port + "/ws";
+    }
+
+    private WebSocketStompClient stompClient() {
         List<Transport> transports = List.of(
                 new WebSocketTransport(new StandardWebSocketClient()));
-        return new SockJsClient(transports);
+        WebSocketStompClient client = new WebSocketStompClient(new SockJsClient(transports));
+        client.setMessageConverter(new MappingJackson2MessageConverter());
+        return client;
     }
 }

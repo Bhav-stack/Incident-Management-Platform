@@ -2,6 +2,7 @@
 package io.aegis.incident.domain;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -27,6 +28,11 @@ import jakarta.persistence.Table;
  * A persisted recovery proposal awaiting the approval gate. Status changes are
  * guarded: only a PENDING proposal can be approved, rejected, or expired, so
  * a duplicate approve/reject request is rejected, not applied twice.
+ *
+ * <p>High-risk actions require two distinct verified operators. The first
+ * approval is recorded and the proposal stays PENDING; the second, from a
+ * different identity, is what releases the command. A single operator can
+ * always reject: a veto needs one signature, an irreversible change needs two.
  */
 @Entity
 @Table(name = "proposals")
@@ -65,6 +71,14 @@ public class Proposal {
     @Column(nullable = false)
     private ProposalStatus status;
 
+    /** One entry per approving identity, in order: operator name and time. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(nullable = false)
+    private List<Map<String, String>> approvals = List.of();
+
+    @Column(name = "approvals_required", nullable = false)
+    private int approvalsRequired = 1;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -88,11 +102,84 @@ public class Proposal {
         this.createdAt = Instant.now();
     }
 
-    public void approve(String approver) {
+    /**
+     * Records an approval from a verified operator identity.
+     *
+     * @return true when this was the approval that released the proposal,
+     *         false when more signatures are still required
+     * @throws IllegalStateException when the proposal is not PENDING, or when
+     *         this operator has already approved it. The two-person rule counts
+     *         people, so approving twice as the same person is one vote, not two.
+     */
+    public boolean approve(String operator) {
+        return approve(operator, Map.of());
+    }
+
+    /**
+     * Records an approval together with the attestation that backs it: how the
+     * identity was proven, and — when the caller presented a signed token —
+     * which issuer signed it and which token id it was. Storing the token id is
+     * what makes this an attestation rather than a note: the signature can be
+     * traced back to one expiring document instead of a reusable secret.
+     *
+     * @param attestation claims from the credential, already verified; empty
+     *                    for a credential that carries no token
+     */
+    public boolean approve(String operator, Map<String, String> attestation) {
         requirePending();
+        if (operator == null || operator.isBlank()) {
+            throw new IllegalStateException(
+                    "Proposal " + externalId + " needs a verified operator identity");
+        }
+        if (approvalOperators().contains(operator)) {
+            throw new IllegalStateException(
+                    "Proposal " + externalId + " was already approved by " + operator);
+        }
+        List<Map<String, String>> updated = new java.util.ArrayList<>(approvals);
+        Map<String, String> signature = new java.util.LinkedHashMap<>();
+        signature.put("operator", operator);
+        signature.put("at", Instant.now().toString());
+        if (attestation != null) {
+            attestation.forEach((claim, value) -> {
+                if (value != null && !value.isBlank()) {
+                    signature.put(claim, value);
+                }
+            });
+        }
+        // Insertion order is preserved so the stored JSON reads in a stable,
+        // human-diffable order: who, when, and how it was proven.
+        updated.add(java.util.Collections.unmodifiableMap(signature));
+        this.approvals = List.copyOf(updated);
+
+        if (approvals.size() < approvalsRequired) {
+            return false;
+        }
         this.status = ProposalStatus.APPROVED;
         this.decidedAt = Instant.now();
-        this.decidedBy = approver;
+        this.decidedBy = operator;
+        return true;
+    }
+
+    /** Operator names that have approved, in order. */
+    public List<String> approvalOperators() {
+        return approvals.stream().map(a -> a.get("operator")).toList();
+    }
+
+    public void setApprovalsRequired(int approvalsRequired) {
+        this.approvalsRequired = Math.max(1, approvalsRequired);
+    }
+
+    public int getApprovalsRequired() {
+        return approvalsRequired;
+    }
+
+    public List<Map<String, String>> getApprovals() {
+        return approvals;
+    }
+
+    /** True while the proposal is still short of its required signatures. */
+    public boolean awaitingFurtherApproval() {
+        return status == ProposalStatus.PENDING && approvals.size() < approvalsRequired;
     }
 
     public void reject(String approver) {

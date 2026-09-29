@@ -16,6 +16,7 @@ import io.aegis.incident.repo.IncidentEventRepository;
 import io.aegis.incident.repo.ProposalRepository;
 import io.aegis.incident.rules.ProposalDraft;
 import io.aegis.incident.rules.Proposer;
+import io.aegis.incident.security.OperatorRegistry;
 import io.aegis.incident.ws.IncidentBroadcaster;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,6 +80,11 @@ class ProposalServiceTest {
         service = new ProposalService(proposals, events, publisher, commands, PROPS, proposer,
                 broadcaster, killSwitches, policy, shadow,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+    }
+
+    /** A named operator credential, as the filter would derive it. */
+    private static OperatorRegistry.Identity operator(String name) {
+        return new OperatorRegistry.Identity(name, true);
     }
 
     private static Incident incidentAt(IncidentStatus status) {
@@ -166,7 +172,7 @@ class ProposalServiceTest {
         Proposal proposal = new Proposal(incidentAt(IncidentStatus.AWAITING_APPROVAL), DRAFT);
         when(proposals.findByExternalId(proposal.getExternalId())).thenReturn(Optional.of(proposal));
 
-        Proposal approved = service.approve(proposal.getExternalId(), "alice");
+        Proposal approved = service.approve(proposal.getExternalId(), operator("alice"));
 
         assertEquals(ProposalStatus.APPROVED, approved.getStatus());
         assertEquals("alice", approved.getDecidedBy());
@@ -181,12 +187,72 @@ class ProposalServiceTest {
         Proposal proposal = new Proposal(incidentAt(IncidentStatus.AWAITING_APPROVAL), DRAFT);
         when(proposals.findByExternalId(proposal.getExternalId())).thenReturn(Optional.of(proposal));
 
-        Proposal rejected = service.reject(proposal.getExternalId(), "alice");
+        Proposal rejected = service.reject(proposal.getExternalId(), operator("alice"));
 
         assertEquals(ProposalStatus.REJECTED, rejected.getStatus());
         assertEquals(IncidentStatus.REJECTED, rejected.getIncident().getStatus());
         verify(publisher).publish(rejected.getIncident());
         verify(broadcaster).proposal(rejected);
+    }
+
+    @Test
+    void highRiskNeedsTwoDistinctOperatorsAndOnlyThenPublishesTheCommand() {
+        Proposal proposal = new Proposal(incidentAt(IncidentStatus.AWAITING_APPROVAL),
+                new ProposalDraft("rollback_deploy", "HIGH", 0.95,
+                        Map.of("target", "checkout-service"),
+                        Map.of("evidence", List.of("deploy regression", "error rate 8.5"))));
+        proposal.setApprovalsRequired(2);
+        when(proposals.findByExternalId(proposal.getExternalId())).thenReturn(Optional.of(proposal));
+
+        Proposal afterFirst = service.approve(proposal.getExternalId(), operator("alice"));
+
+        assertEquals(ProposalStatus.PENDING, afterFirst.getStatus(),
+                "one signature must not release a two-person action");
+        assertEquals(List.of("alice"), afterFirst.approvalOperators());
+        verify(commands, never()).publish(any(io.aegis.contracts.events.ActionCommandEvent.class));
+        verify(events).save(argThat(e -> e.getEventType().equals("APPROVAL_RECORDED")));
+
+        Proposal afterSecond = service.approve(proposal.getExternalId(), operator("bob"));
+
+        assertEquals(ProposalStatus.APPROVED, afterSecond.getStatus());
+        assertEquals(List.of("alice", "bob"), afterSecond.approvalOperators());
+        verify(commands).publish(any(io.aegis.contracts.events.ActionCommandEvent.class));
+    }
+
+    @Test
+    void theSameOperatorCannotApproveTwiceEvenWithOneSignatureRequired() {
+        Proposal proposal = new Proposal(incidentAt(IncidentStatus.AWAITING_APPROVAL), DRAFT);
+        when(policy.requiredApprovals(any())).thenReturn(2);
+        proposal.setApprovalsRequired(2);
+        when(proposals.findByExternalId(proposal.getExternalId())).thenReturn(Optional.of(proposal));
+
+        service.approve(proposal.getExternalId(), operator("alice"));
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> service.approve(proposal.getExternalId(), operator("alice")));
+
+        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+        verify(commands, never()).publish(any(io.aegis.contracts.events.ActionCommandEvent.class));
+    }
+
+    @Test
+    void theSharedClientIdentityCannotSatisfyATwoPersonAction() {
+        Proposal proposal = new Proposal(incidentAt(IncidentStatus.AWAITING_APPROVAL),
+                new ProposalDraft("rollback_deploy", "HIGH", 0.95,
+                        Map.of("target", "checkout-service"),
+                        Map.of("evidence", List.of("deploy regression", "error rate 8.5"))));
+        proposal.setApprovalsRequired(2);
+        when(proposals.findByExternalId(proposal.getExternalId())).thenReturn(Optional.of(proposal));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> service.approve(proposal.getExternalId(),
+                        new OperatorRegistry.Identity("dashboard", false)));
+
+        assertEquals(HttpStatus.FORBIDDEN, e.getStatusCode());
+        assertTrue(e.getReason().contains("two named operators"));
+        assertEquals(ProposalStatus.PENDING, proposal.getStatus());
+        assertTrue(proposal.approvalOperators().isEmpty(),
+                "an unattributable identity must not even be recorded as a signature");
+        verify(commands, never()).publish(any(io.aegis.contracts.events.ActionCommandEvent.class));
     }
 
     @Test
@@ -196,7 +262,7 @@ class ProposalServiceTest {
         when(proposals.findByExternalId(proposal.getExternalId())).thenReturn(Optional.of(proposal));
 
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> service.approve(proposal.getExternalId(), "bob"));
+                () -> service.approve(proposal.getExternalId(), operator("bob")));
         assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
     }
 

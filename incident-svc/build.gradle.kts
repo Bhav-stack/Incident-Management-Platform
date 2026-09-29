@@ -12,6 +12,7 @@ dependencies {
     implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.boot.starter.websocket)
+    implementation(libs.spring.security.oauth2.jose)
     implementation(libs.micrometer.registry.prometheus)
     implementation(libs.spring.kafka)
     implementation(libs.flyway.core)

@@ -14,6 +14,11 @@ spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boo
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
 spring-boot-starter-websocket = { module = "org.springframework.boot:spring-boot-starter-websocket" }
+# JOSE/JWT verification core (Nimbus). Pulled in directly so the control plane
+# can verify bearer tokens without adopting a whole Spring Security filter
+# chain: identity resolution stays in one explicit filter that understands both
+# credential types (machine API key, operator JWT).
+spring-security-oauth2-jose = { module = "org.springframework.security:spring-security-oauth2-jose" }
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
 spring-kafka = { module = "org.springframework.kafka:spring-kafka" }

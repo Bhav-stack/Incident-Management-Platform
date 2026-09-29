@@ -6,6 +6,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -39,16 +40,21 @@ public class IncidentBroadcaster {
                 proposal.getStatus().name(),
                 proposal.getCreatedAt(),
                 proposal.getDecidedAt(),
-                proposal.getDecidedBy()));
+                proposal.getDecidedBy(),
+                proposal.approvalOperators(),
+                proposal.getApprovalsRequired()));
     }
 
     /**
      * Proposal feed payload. Deliberately flat and self-contained: the
      * dashboard can render the approval gate without joining the incident.
+     * {@code approvals} plus {@code approvalsRequired} is what lets the UI say
+     * "1 of 2 signatures" while a high-risk action waits for a second person.
      */
     public record ProposalMessage(UUID externalId, UUID incidentExternalId, String service,
                                   String actionType, String riskLevel, double confidence,
                                   String status, Instant createdAt, Instant decidedAt,
-                                  String decidedBy) {
+                                  String decidedBy, List<String> approvals,
+                                  int approvalsRequired) {
     }
 }

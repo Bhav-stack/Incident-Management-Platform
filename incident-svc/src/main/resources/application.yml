@@ -52,6 +52,10 @@ policy:
     kill_instance: 0.90
   min-evidence-signals: 2
   auto-approve-low: false
+  # Risk levels that need two distinct verified operators to approve. The
+  # requirement is captured on the proposal when it is created, so relaxing
+  # this later cannot retroactively weaken a decision already taken.
+  two-person-levels: HIGH
 
 # Replay harness ground truth (Phase 5b): demo scenarios the shadow
 # evaluator scores the proposer against. no_action is the negative class.
@@ -73,12 +77,51 @@ proposal:
   ttl: 5m              # approval window; expiry escalates, never auto-approves
   sweep-interval: 30s
 
-# Control-plane authentication. Every /api request must carry X-API-Key when
-# this is set; leaving it empty disables the filter (local dev and tests) and
-# logs a startup warning. The same value is sent to the simulator.
+# Control-plane authentication. Every /api request must present a credential
+# when this is set; with nothing configured the filter is disabled (local dev
+# and tests) and logs a startup warning. The same api-key value is sent to the
+# simulator.
+#
+# api-key is the shared secret the dashboard proxy holds. Each entry under
+# operators is a per-person credential: a request carrying one in
+# X-Operator-Key is attributed to that name, which is what makes an approval
+# attributable and what the two-person rule counts. Without at least two
+# operators configured, HIGH-risk actions cannot be approved at all, by design.
+#
+# oidc decides where bearer tokens come from. Set issuer-uri to validate tokens
+# from a real provider (OIDC discovery + JWKS); alternatively set
+# self-issued-secret and the service mints its own short-lived operator tokens
+# at POST /api/auth/session, which is what the dashboard uses to sign an
+# approval as a person. With neither set, tokens are refused and only keys
+# authenticate.
 aegis:
   security:
     api-key: ${AEGIS_API_KEY:}
+    default-operator: ${AEGIS_OPERATOR_NAME:operator}
+    operators:
+      - name: ${AEGIS_OPERATOR_1_NAME:oncall-primary}
+        key: ${AEGIS_OPERATOR_1_KEY:}
+      - name: ${AEGIS_OPERATOR_2_NAME:oncall-secondary}
+        key: ${AEGIS_OPERATOR_2_KEY:}
+    # The incident feed needs a fresh single-use ticket in the STOMP CONNECT
+    # frame. Tickets are issued by POST /api/ws-ticket through the proxy, so
+    # the browser never holds the API key.
+    ws-require-ticket: ${AEGIS_WS_REQUIRE_TICKET:true}
+    ws-ticket-ttl-seconds: 60
+    oidc:
+      issuer-uri: ${AEGIS_OIDC_ISSUER_URI:}
+      audience: ${AEGIS_OIDC_AUDIENCE:aegis-control-plane}
+      # Built-in issuer, for local and demo runs. The issuer must be an
+      # absolute http(s) URL: a JWT 'iss' claim is a URL. The secret must be
+      # >= 32 bytes for HS256 (`openssl rand -base64 48`); empty turns the
+      # built-in issuer off.
+      self-issued-issuer: ${AEGIS_JWT_ISSUER:https://aegis.local/control-plane}
+      self-issued-secret: ${AEGIS_JWT_SECRET:}
+      token-ttl-seconds: ${AEGIS_JWT_TTL_SECONDS:300}
+      # Claim that says whether a token's subject is a person. A subject with
+      # no such claim counts as one; the built-in issuer sets it to false when
+      # it mints a token for the shared client credential.
+      attributable-claim: aegis_attributable
 
 # Action execution and verification
 simulator:

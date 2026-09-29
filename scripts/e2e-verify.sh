@@ -4,28 +4,48 @@
 # and capture the live events on every Kafka topic at each milestone.
 #
 # Usage (on a machine with Docker and JDK 17+):
-#   ./scripts/e2e-verify.sh             # happy path:  restart -> verified -> resolved
-#   ./scripts/e2e-verify.sh --stubborn  # rollback path: verify fails -> auto-rollback
-#   ./scripts/e2e-verify.sh --keep      # do not tear the stack down at the end
+#   ./scripts/e2e-verify.sh                    # happy path: restart -> verified
+#   ./scripts/e2e-verify.sh --stubborn         # rollback: verify fails -> auto-rollback
+#   ./scripts/e2e-verify.sh --capture docs/e2e-dumps   # save the topic dumps
+#   ./scripts/e2e-verify.sh --keep             # leave the stack running afterwards
+#   ./scripts/e2e-verify.sh --wipe             # delete the data volumes on exit
 #
 # Flow verified:
 #   error-spike -> raw.events -> anomaly -> incident -> proposal -> approve
 #   -> action.commands -> execute -> verify -> resolved (or rolled back)
+#
+# Teardown is deliberately conservative: containers are stopped and their
+# volumes are kept, so incident history survives a verification run. Pass
+# --wipe when you actually want a clean database.
 # ============================================================================
 set -euo pipefail
+
+# Git Bash on Windows rewrites POSIX-looking arguments into Windows paths
+# before handing them to a native binary, so `docker exec ... /opt/kafka/bin/x`
+# became `C:/Program Files/Git/opt/kafka/bin/x` and every Kafka dump came back
+# empty. This variable disables that rewrite; it is ignored on Linux/macOS.
+export MSYS_NO_PATHCONV=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 MODE="happy"
 KEEP=""
-for arg in "$@"; do
-  case "$arg" in
+WIPE=""
+CAPTURE_DIR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --stubborn) MODE="stubborn" ;;
     --keep)     KEEP="1" ;;
-    *) echo "unknown option: $arg" >&2; exit 1 ;;
+    --wipe)     WIPE="1" ;;
+    --capture)  CAPTURE_DIR="${2:?--capture needs a directory}"; shift ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
+  shift
 done
+if [ -n "$CAPTURE_DIR" ]; then
+  mkdir -p "$CAPTURE_DIR"
+fi
 
 SERVICE="checkout-service"
 API="http://localhost:8082/api"
@@ -40,6 +60,15 @@ if [ -n "${AEGIS_API_KEY:-}" ]; then
   AUTH=(-H "X-API-Key: ${AEGIS_API_KEY}")
   echo "control-plane API key: using AEGIS_API_KEY from the environment"
 fi
+
+# The approval is a person's decision, so this script signs it with a person's
+# credential rather than the shared client key. With an operator key AND a
+# token issuer configured it goes one step further and exchanges the key for a
+# signed token, so the run proves the JWT path end to end; otherwise the
+# operator key itself is presented. Both are attributable; the shared key is
+# not, and is used only as a last resort so that a bare local stack still
+# runs.
+OPERATOR_KEY="${AEGIS_OPERATOR_1_KEY:-}"
 
 # JSON parsing uses node: the dashboard already requires it, and it is
 # present on the development machines and GitHub runners, unlike python3.
@@ -68,12 +97,33 @@ compose_healthy() { # service
   die "container $1 not healthy"
 }
 
-kafka_dump() { # topic label
-  local topic="$1" label="$2"
-  log "kafka topic [$topic] - $label"
+# Reads a topic with the broker's own CLI and prints every record. The
+# consumer writes records to stdout and its log4j chatter to stderr, so the
+# first stdout line is a real record: do not strip it.
+kafka_records() { # topic
   docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
-    --bootstrap-server localhost:9092 --topic "$topic" \
-    --from-beginning --timeout-ms 4000 2>/dev/null | tail -n +2 || true
+    --bootstrap-server localhost:9092 --topic "$1" \
+    --from-beginning --timeout-ms 4000 2>/dev/null || true
+}
+
+kafka_dump() { # topic label [grep-pattern] [max-lines]
+  local topic="$1" label="$2" pattern="${3:-}" max="${4:-0}" out
+  log "kafka topic [$topic] - $label"
+  out="$(kafka_records "$topic")"
+  if [ -n "$pattern" ]; then
+    out="$(printf '%s\n' "$out" | grep -F "$pattern" || true)"
+  fi
+  if [ "$max" -gt 0 ] && [ -n "$out" ]; then
+    out="$(printf '%s\n' "$out" | tail -n "$max")"
+  fi
+  if [ -z "$out" ]; then
+    echo "  (no records on $topic for this filter)"
+  else
+    printf '%s\n' "$out"
+    if [ -n "$CAPTURE_DIR" ]; then
+      printf '%s\n' "$out" > "$CAPTURE_DIR/$MODE-$topic.ndjson"
+    fi
+  fi
 }
 
 # json <expression>  — reads a JSON document on stdin, evaluates the
@@ -135,9 +185,14 @@ INCIDENT_PID=$!
 
 cleanup() {
   kill "$SIM_PID" "$INGEST_PID" "$INCIDENT_PID" 2>/dev/null || true
-  if [ -z "$KEEP" ]; then
-    log "tearing down (use --keep to leave the stack running)"
+  if [ -n "$WIPE" ]; then
+    log "tearing down and deleting volumes (--wipe)"
     docker compose down -v
+  elif [ -z "$KEEP" ]; then
+    log "stopping the containers; volumes are kept (--wipe deletes them)"
+    docker compose stop
+  else
+    log "leaving the stack running (--keep)"
   fi
 }
 trap cleanup EXIT
@@ -162,14 +217,44 @@ log "waiting for anomaly -> incident -> proposal (buffer 5s + 2-window confirm)"
 await_status "AWAITING_APPROVAL" 90
 INCIDENT_ID="$(first_incident_id)"
 ok "incident $INCIDENT_ID awaiting approval"
-kafka_dump "anomalies"   "confirmed anomaly for $SERVICE"
-kafka_dump "incidents"   "incident state changes so far"
+# raw.events is the high-volume input topic, so it is filtered to the service
+# under test and capped; the derived topics are small enough to dump whole.
+kafka_dump "raw.events"    "input events for $SERVICE (last 4)" "$SERVICE" 4
+kafka_dump "anomalies"     "confirmed anomaly for $SERVICE"
+kafka_dump "incidents"     "incident state changes so far"
 
 log "approving the proposal"
 PROPOSAL_ID="$(first_proposal_id "$INCIDENT_ID")"
-curl -sf "${AUTH[@]}" -X POST "$API/proposals/$PROPOSAL_ID/approve" \
-  -H 'Content-Type: application/json' -d '{"approver":"e2e"}'
+
+# Build the decision credential once. Approve takes no body: the approver is
+# whatever the credential names, never a field the caller can set.
+DECISION=()
+SIGNED_AS="the shared client key"
+if [ -n "$OPERATOR_KEY" ] && [ -n "${AEGIS_JWT_SECRET:-}" ]; then
+  TOKEN="$(curl -sf -X POST -H "X-Operator-Key: $OPERATOR_KEY" "$API/auth/session" \
+    | json "data.token" 2>/dev/null || true)"
+  if [ -n "${TOKEN:-}" ] && [ "$TOKEN" != "undefined" ]; then
+    DECISION=(-H "Authorization: Bearer $TOKEN")
+    SIGNED_AS="an operator token from the built-in issuer"
+  fi
+fi
+if [ ${#DECISION[@]} -eq 0 ] && [ -n "$OPERATOR_KEY" ]; then
+  DECISION=(-H "X-Operator-Key: $OPERATOR_KEY")
+  SIGNED_AS="an operator key"
+fi
+if [ ${#DECISION[@]} -eq 0 ]; then
+  DECISION=("${AUTH[@]}")
+fi
+echo "  signing as: $SIGNED_AS"
+
+curl -sf "${DECISION[@]}" -X POST "$API/proposals/$PROPOSAL_ID/approve" >/dev/null
 ok "proposal $PROPOSAL_ID approved -> action.commands"
+
+# The point of the new credential path: the approval records how it was
+# proven, and for a token, which document signed it.
+log "approval attestation recorded on the proposal"
+curl -sf "${AUTH[@]}" "$API/proposals/$PROPOSAL_ID" \
+  | json "data.approvals.map(a => a.operator + ' via ' + a.method + (a.tokenId ? ' token ' + a.tokenId : '')).join(', ') || '(no approvals recorded)'"
 
 log "watching execute -> verify"
 if [ "$MODE" = "happy" ]; then
@@ -179,6 +264,9 @@ else
 fi
 kafka_dump "action.commands" "approved command executed by the executor"
 kafka_dump "incidents"       "final incident state changes"
+if [ -n "$CAPTURE_DIR" ]; then
+  echo "  dumps written to $CAPTURE_DIR ($MODE path)"
+fi
 
 log "final state"
 TIMELINE="$(timeline_types "$INCIDENT_ID")"

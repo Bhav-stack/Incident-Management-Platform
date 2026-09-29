@@ -123,11 +123,20 @@ public class IncidentService {
                 + anomaly.threshold() + ") on " + anomaly.service();
     }
 
+    /**
+     * Opens an incident without the ingest pipeline, for the dashboard's
+     * manual control and the end-to-end tests. Every other state change in
+     * this service publishes to Kafka and the WebSocket feed; this one must
+     * too, otherwise a manually opened incident never reaches a subscribed
+     * dashboard.
+     */
     @Transactional
     public Incident openIncident(String service, Severity severity, String summary) {
         Incident incident = new Incident(service, severity, summary);
-        incidents.save(incident);
+        incident.transitionTo(IncidentStatus.INVESTIGATING);
+        incidents.saveAndFlush(incident);
         events.save(new IncidentEvent(incident, "OPENED", Map.of("summary", summary)));
+        publisher.publish(incident);
         return incident;
     }
 

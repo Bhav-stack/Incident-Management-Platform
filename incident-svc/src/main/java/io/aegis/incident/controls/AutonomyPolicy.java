@@ -63,11 +63,36 @@ public class AutonomyPolicy {
                     "evidence (%d signals) below the %d minimum",
                     signals, properties.minEvidenceSignals()));
         }
+        if (requiresTwoPersonApproval(draft.riskLevel())) {
+            // Never auto-approve a tier that exists because two humans must
+            // sign off. Stated as an explicit check rather than relying on the
+            // default two-person level being HIGH and auto-approve being LOW.
+            return new Decision(Verdict.HUMAN_APPROVAL,
+                    draft.riskLevel() + " risk requires two operators; never auto-approved");
+        }
         if ("LOW".equals(draft.riskLevel()) && autoApproveLow()) {
             return new Decision(Verdict.AUTO_APPROVE, "LOW risk, confidence and evidence cleared");
         }
         return new Decision(Verdict.HUMAN_APPROVAL,
                 "human approval required for " + draft.riskLevel() + " risk");
+    }
+
+    /**
+     * True when a risk level needs two distinct verified operators. Config
+     * driven, so raising the bar for an action is a policy change rather than
+     * a code change.
+     */
+    public boolean requiresTwoPersonApproval(String riskLevel) {
+        return riskLevel != null && properties.twoPersonLevels().contains(riskLevel);
+    }
+
+    /** Signatures a proposal at this risk level must collect. */
+    public int requiredApprovals(String riskLevel) {
+        return requiresTwoPersonApproval(riskLevel) ? 2 : 1;
+    }
+
+    public List<String> twoPersonLevels() {
+        return properties.twoPersonLevels();
     }
 
     /** Evidence signals = entries in the reasoning evidence list. */
