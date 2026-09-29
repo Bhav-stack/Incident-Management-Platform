@@ -24,7 +24,16 @@ dist/
 # Environment
 .env
 *.log
+*.log.err
+*.pid
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Scratch directory used by scripts/loadtest.sh (removed on exit; listed so an
+# interrupted run cannot leave untracked noise behind)
+.aegis-loadtest.*/
+
+# Local run notes, service logs and load-test samples captured while developing.
+.freebuff/

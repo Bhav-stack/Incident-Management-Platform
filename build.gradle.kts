@@ -29,5 +29,12 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
+
+        // Tests must not depend on the developer's clock settings. The JDBC
+        // driver sends the JVM's default time-zone name to PostgreSQL in the
+        // connection startup packet, and modern images ship a tzdata that no
+        // longer carries legacy aliases such as "Asia/Calcutta". Tests run in
+        // UTC the same way the deployed containers do.
+        systemProperty("user.timezone", "UTC")
     }
 }
