@@ -1,0 +1,1 @@
+{"commandId":"7e81966f-b484-489d-b3e7-7e814b9a19d5","proposalId":"6041b0e0-02a5-42f9-9f35-6e0d1225104d","incidentId":"b192c04b-ff27-4a84-a9dc-7b5178282014","service":"checkout-service","actionType":"restart_instance","params":{"target":"checkout-service"},"issuedAt":"2026-09-28T14:18:04.907297300Z"}

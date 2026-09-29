@@ -1,0 +1,1 @@
+{"eventId":"d5ff4535-eb96-42bf-860c-a9c34b580765","sourceEventId":"b18be0fe-8066-4707-a6bc-691f1f325805","service":"checkout-service","signal":"error_rate","value":8.561,"threshold":5.0,"severity":"SEV2","windowStart":"2026-09-28T14:20:04.516767800Z"}
