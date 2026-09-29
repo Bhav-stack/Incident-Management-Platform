@@ -1,0 +1,110 @@
+
+================ ingest load ladder ================
+Each step: offered events/sec, how much of that stream the pipeline completed
+while it was still being produced ('ordered_by_end_of_phase' - the sustained
+rate it actually held), and the mean per-stage cost for the step. 'ordered'
+means the event passed dedup, the out-of-order buffer and the rules.
+'kept up' compares that against the events that were due by then: the offered
+stream minus the 5s ordering window and the 1s flush tick,
+which a pipeline that is keeping up still has in flight when the phase ends.
+
+step offered=200/s generated_by_producer=6000 received=6000 deduplicated=547 ordered=5453
+     generator_wall_ms=30599 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=4484 = 4800 due by then, so 93% kept up
+         (149/s sustained, 75% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=6313 drain_rate=240/s dropped_straggler=0 dropped_overflow=0 anomalies=0
+     mean aegis_ingest_dedup          0.511
+     mean aegis_ingest_buffer_offer      0.003
+     mean aegis_ingest_rule           0.073
+     mean aegis_ingest_event_to_rule   5519.504
+step offered=1000/s generated_by_producer=30000 received=30000 deduplicated=2941 ordered=27059
+     generator_wall_ms=30576 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=22656 = 24000 due by then, so 94% kept up
+         (755/s sustained, 76% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=6183 drain_rate=1188/s dropped_straggler=0 dropped_overflow=0 anomalies=0
+     mean aegis_ingest_dedup          0.141
+     mean aegis_ingest_buffer_offer      0.002
+     mean aegis_ingest_rule           0.015
+     mean aegis_ingest_event_to_rule   5513.640
+step offered=2000/s generated_by_producer=60000 received=60000 deduplicated=5931 ordered=54069
+     generator_wall_ms=30747 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=44533 = 48000 due by then, so 93% kept up
+         (1484/s sustained, 74% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=6636 drain_rate=2331/s dropped_straggler=0 dropped_overflow=0 anomalies=0
+     mean aegis_ingest_dedup          0.094
+     mean aegis_ingest_buffer_offer      0.002
+     mean aegis_ingest_rule           0.008
+     mean aegis_ingest_event_to_rule   5516.797
+step offered=5000/s generated_by_producer=150000 received=150000 deduplicated=14763 ordered=135237
+     generator_wall_ms=30646 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=110806 = 120000 due by then, so 92% kept up
+         (3694/s sustained, 74% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=6247 drain_rate=6274/s dropped_straggler=0 dropped_overflow=0 anomalies=0
+     mean aegis_ingest_dedup          0.083
+     mean aegis_ingest_buffer_offer      0.002
+     mean aegis_ingest_rule           0.006
+     mean aegis_ingest_event_to_rule   5540.642
+step offered=7000/s generated_by_producer=210000 received=210000 deduplicated=20940 ordered=189060
+     generator_wall_ms=30716 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=160465 = 168000 due by then, so 96% kept up
+         (5349/s sustained, 76% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=6001 drain_rate=8254/s dropped_straggler=0 dropped_overflow=0 anomalies=0
+     mean aegis_ingest_dedup          0.083
+     mean aegis_ingest_buffer_offer      0.002
+     mean aegis_ingest_rule           0.006
+     mean aegis_ingest_event_to_rule   5563.371
+step offered=10000/s generated_by_producer=300000 received=300000 deduplicated=29923 ordered=270077
+     generator_wall_ms=31001 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=177800 = 240000 due by then, so 74% kept up
+         (5927/s sustained, 59% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=12560 drain_rate=9729/s dropped_straggler=0 dropped_overflow=0 anomalies=0
+     mean aegis_ingest_dedup          0.079
+     mean aegis_ingest_buffer_offer      0.002
+     mean aegis_ingest_rule           0.006
+     mean aegis_ingest_event_to_rule  10447.944
+
+stage (whole run)          p50 (ms)   p95 (ms)   p99 (ms)   max (ms)
+dedup                         0.072      0.145      0.178      2.314
+buffer_offer                  0.001      0.004      0.005     12.186
+rule                          0.006      0.010      0.012      0.058
+event_to_rule             11005.854  13153.337  13153.337  13522.635
+
+totals since the service started
+  received               : 756000
+  deduplicated           : 75045
+  ordered                : 680955
+  dropped (straggler)    : 0
+  dropped (overflow)     : 0
+  anomalies emitted      : 0
+
+reading the numbers
+  keep-up                : ordered_by_end_of_phase against the events due by the end
+                           of the phase (offered minus window minus flush tick). Under
+                           100% the pipeline is accumulating backlog, and past window +
+                           grace that backlog is dropped, not delayed.
+  drain_rate             : the backlog divided by the catch-up time, i.e. the
+                           pipeline's own rate once the producer stopped competing
+                           for the machine. Read it as the pipeline's capacity;
+                           keep-up below it means the rig, not the pipeline, is the
+                           limit for that step.
+  dedup / buffer_offer   : paid once per received event, on the consumer thread
+  rule                   : paid once per ordered sample, on the flush thread
+  event_to_rule          : event time to rule evaluation. It includes the
+                           deliberate 5s ordering window plus however long the
+                           event waited to be produced and consumed, so it is a
+                           staleness figure, not a processing cost.
+  percentiles            : Micrometer publishes them over a rolling window, so
+                           the table above describes the end of the run rather
+                           than any single step; the per-step means are exact.

@@ -3,6 +3,8 @@ package io.aegis.ingest.pipeline;
 import io.aegis.contracts.events.EventType;
 import io.aegis.contracts.events.RawEvent;
 import io.aegis.ingest.config.IngestProperties;
+import io.aegis.ingest.metrics.IngestMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -22,12 +24,17 @@ class OutOfOrderBufferTest {
     private static final Duration GRACE = Duration.ofSeconds(15);
 
     private final MutableClock clock = new MutableClock(START);
+    private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
 
     private OutOfOrderBuffer buffer() {
+        return buffer(1000);
+    }
+
+    private OutOfOrderBuffer buffer(int maxQueueSize) {
         IngestProperties props = new IngestProperties(Duration.ofHours(1),
-                new IngestProperties.Buffer(WINDOW, GRACE, Duration.ofSeconds(1), 1000),
-                null);
-        return new OutOfOrderBuffer(props, clock);
+                new IngestProperties.Buffer(WINDOW, GRACE, Duration.ofSeconds(1), maxQueueSize),
+                null, null);
+        return new OutOfOrderBuffer(props, clock, new IngestMetrics(metrics));
     }
 
     private static RawEvent event(Instant eventTime, String source) {
@@ -44,9 +51,9 @@ class OutOfOrderBufferTest {
         RawEvent newest = event(START.plusSeconds(4), "s:1");
         RawEvent oldest = event(START.plusSeconds(1), "s:1");
         RawEvent middle = event(START.plusSeconds(2), "s:1");
-        buffer.offer(newest, emitted::add);
-        buffer.offer(oldest, emitted::add);
-        buffer.offer(middle, emitted::add);
+        buffer.offer(newest, emitted::addAll);
+        buffer.offer(oldest, emitted::addAll);
+        buffer.offer(middle, emitted::addAll);
 
         // Nothing may be emitted while events are still inside the window.
         buffer.flush();
@@ -66,12 +73,27 @@ class OutOfOrderBufferTest {
 
         // > 20s behind the watermark (window 5s + grace 15s) -> too late.
         RawEvent straggler = event(START.minusSeconds(21), "s:1");
-        buffer.offer(straggler, emitted::add);
+        buffer.offer(straggler, emitted::addAll);
 
         clock.advance(WINDOW.plusSeconds(1));
         buffer.flush();
 
         assertTrue(emitted.isEmpty());
+        // The drop has to be countable, not just a line in the log: a silent
+        // drop is indistinguishable from a pipeline that is keeping up.
+        assertEquals(1.0, metrics.counter("aegis_events_dropped_straggler").count());
+    }
+
+    @Test
+    void countsOverflowDrops() {
+        OutOfOrderBuffer buffer = buffer(2);
+        List<RawEvent> emitted = new ArrayList<>();
+
+        for (int i = 0; i < 5; i++) {
+            buffer.offer(event(START.plusSeconds(i), "s:1"), emitted::addAll);
+        }
+
+        assertEquals(3.0, metrics.counter("aegis_events_dropped_overflow").count());
     }
 
     @Test
@@ -82,8 +104,8 @@ class OutOfOrderBufferTest {
         // 10s behind: inside grace, must be held then emitted in order.
         RawEvent late = event(START.minusSeconds(10), "s:1");
         RawEvent onTime = event(START, "s:1");
-        buffer.offer(late, emitted::add);
-        buffer.offer(onTime, emitted::add);
+        buffer.offer(late, emitted::addAll);
+        buffer.offer(onTime, emitted::addAll);
 
         clock.advance(WINDOW.plusSeconds(1));
         buffer.flush();

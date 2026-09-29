@@ -1,6 +1,14 @@
 spring:
   application:
     name: ingest-svc
+  task:
+    scheduling:
+      # The buffer flush runs every second on this scheduler. With the default
+      # pool size of one, a slow periodic task (the Kafka lag sampler makes
+      # admin calls over the network) delays every flush, which shows up as
+      # staleness rather than as an error. Give each periodic task a thread.
+      pool:
+        size: 4
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -10,6 +18,11 @@ spring:
       auto-offset-reset: earliest
       enable-auto-commit: false   # at-least-once: offsets commit only after processing
     listener:
+      # Batch listening is what lets dedup pipeline one Redis round trip per
+      # poll batch instead of one per event (the measured ingest bottleneck).
+      # Manual acks then commit the batch offset only after the whole batch
+      # was accepted by the pipeline.
+      type: batch
       ack-mode: manual
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -31,11 +44,22 @@ spring:
 # Pipeline tuning — config-driven policy, never hard-coded.
 ingest:
   dedup-ttl: 1h
+  # Consumer parallelism. raw.events is created with this many partitions and
+  # the listener runs this many threads; the producer keys by source, so each
+  # source stays on one partition and keeps its order.
+  consumer:
+    partitions: 3
+    concurrency: 3
   buffer:
     window: 5s          # hold events so out-of-order siblings arrive
     grace: 15s          # drop events later than window + grace
     flush-interval: 1s
-    max-queue-size: 1000
+    # Per-source queue cap. It must hold at least one window of traffic per
+    # source (window x per-source rate), or the oldest-first trim drops events
+    # that were about to become due — which reads as overflow loss even when
+    # the flush is keeping up. 5s x 4000/s per source covers this host's head-
+    # room with margin; the cap still bounds memory under a runaway producer.
+    max-queue-size: 20000
   rule:
     error-rate-threshold: 5.0
     required-streaks: 2 # confirmation window: 2 consecutive breach samples

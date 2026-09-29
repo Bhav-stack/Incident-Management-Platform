@@ -12,7 +12,8 @@ import java.time.Duration;
 public record IngestProperties(
         Duration dedupTtl,
         Buffer buffer,
-        Rule rule
+        Rule rule,
+        Consumer consumer
 ) {
 
     /**
@@ -22,6 +23,18 @@ public record IngestProperties(
      * @param maxQueueSize  per-source cap; oldest entries dropped first
      */
     public record Buffer(Duration window, Duration grace, Duration flushInterval, int maxQueueSize) {
+    }
+
+    /**
+     * Consumer parallelism, matched to the {@code raw.events} partition count.
+     * The topic is created with {@code partitions} partitions and the listener
+     * runs {@code concurrency} threads; the producer keys by {@code source}, so
+     * each source still lands on one partition and keeps its order.
+     *
+     * @param partitions  partitions to create {@code raw.events} with
+     * @param concurrency listener threads (clamped to at least one per partition)
+     */
+    public record Consumer(int partitions, int concurrency) {
     }
 
     /**
@@ -41,5 +54,8 @@ public record IngestProperties(
         rule = rule == null
                 ? new Rule(5.0, 2, "error_rate", "SEV2")
                 : rule;
+        consumer = consumer == null
+                ? new Consumer(3, 3)
+                : consumer;
     }
 }

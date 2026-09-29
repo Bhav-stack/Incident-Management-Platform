@@ -16,8 +16,9 @@ public class EventStatsService {
 
     private final AtomicLong total = new AtomicLong();
 
-    public void recordCount() {
-        total.incrementAndGet();
+    /** Records a whole consumed batch; the endpoint reports the event total. */
+    public void recordCount(long events) {
+        total.addAndGet(events);
     }
 
     public Map<String, Long> snapshot() {

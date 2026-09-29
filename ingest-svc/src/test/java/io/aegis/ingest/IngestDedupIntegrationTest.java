@@ -19,8 +19,8 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -48,6 +48,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 class IngestDedupIntegrationTest {
 
+    // apache/kafka image -> the KafkaContainer built for it; the older
+    // containers.KafkaContainer targets Confluent images and rejects this one.
     @Container
     static final KafkaContainer KAFKA =
             new KafkaContainer(DockerImageName.parse("apache/kafka:3.7.0"));
