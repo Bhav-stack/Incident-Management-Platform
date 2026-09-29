@@ -9,6 +9,8 @@ import LiveView from "./components/LiveView";
 import DetailView from "./components/DetailView";
 import PostMortemView from "./components/PostMortemView";
 import ControlsView from "./components/ControlsView";
+import OperatorSession from "./components/OperatorSession";
+import { DetailSkeleton } from "./components/Skeleton";
 
 type View = "live" | "detail" | "postmortem" | "controls";
 
@@ -31,6 +33,10 @@ export default function App() {
   const [trace, setTrace] = useState<TraceStep[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [approvalCount, setApprovalCount] = useState(0);
+  // Detail loads on selection, so the panel has its own loading state: without
+  // it the previous incident's trace and proposal stay on screen under the new
+  // incident's header.
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // Clock tick (topbar + TTL countdown share it).
   useEffect(() => {
@@ -98,7 +104,15 @@ export default function App() {
         setApprovalCount((c) => c + 1);
         setProposal((prev) =>
           prev && prev.externalId === msg.externalId
-            ? { ...prev, status: msg.status, decidedAt: msg.decidedAt, decidedBy: msg.decidedBy }
+            ? {
+                ...prev,
+                status: msg.status,
+                decidedAt: msg.decidedAt,
+                decidedBy: msg.decidedBy,
+                // The live feed carries names; the REST detail carries times.
+                approvals: msg.approvals?.map((operator) => ({ operator })),
+                approvalsRequired: msg.approvalsRequired,
+              }
             : prev,
         );
       },
@@ -116,6 +130,7 @@ export default function App() {
   };
 
   const loadDetail = async (incidentId: string) => {
+    setDetailLoading(true);
     try {
       const [inc, evts, props] = await Promise.all([
         api.incident(incidentId),
@@ -132,6 +147,8 @@ export default function App() {
       setTimeline(sampleTimeline);
       setProposal(sampleProposal);
       setTrace([]);
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -158,7 +175,7 @@ export default function App() {
           <div className="name">Aegis</div>
           <div className="sub" style={{ marginLeft: 2 }}>Autonomous Incident Recovery</div>
         </div>
-        <nav className="tabs">
+        <nav className="tabs" role="tablist" aria-label="Dashboard views">
           <Tab label="Live Incidents" count={activeCount} view="live" current={view} onClick={setView} />
           <Tab label={selected ? `Incident ${selected.externalId}` : "Incident"} view="detail" current={view} onClick={setView} />
           <Tab label="Post-Mortem" view="postmortem" current={view} onClick={setView} />
@@ -166,15 +183,22 @@ export default function App() {
         </nav>
         <div className="topbar-right">
           <div className={`live-dot ${wsConnected ? "" : "offline"}`}><span className="dot"></span>{wsLabel}</div>
+          <OperatorSession variant="compact" />
           <div className="clock">{nowUtc()}</div>
           <div className="killswitch-btn"><PowerIcon /> Global kill switch</div>
         </div>
       </header>
 
       {view === "live" && (
-        <LiveView incidents={incidents} live={live} onSelect={selectIncident} />
+        <LiveView
+          incidents={incidents}
+          live={live}
+          loading={!loaded}
+          onSelect={selectIncident}
+        />
       )}
-      {view === "detail" && selected && (
+      {view === "detail" && selected && detailLoading && <DetailSkeleton />}
+      {view === "detail" && selected && !detailLoading && (
         <DetailView
           incident={selected}
           timeline={timeline}
@@ -184,6 +208,7 @@ export default function App() {
           now={now}
         />
       )}
+      {view === "detail" && !selected && <DetailSkeleton />}
       {view === "postmortem" && <PostMortemView live={live} />}
       {view === "controls" && <ControlsView />}
 
@@ -206,7 +231,19 @@ function Tab({
   label: string; count?: number; view: View; current: View; onClick: (v: View) => void;
 }) {
   return (
-    <div className={`tab ${current === view ? "active" : ""}`} onClick={() => onClick(view)}>
+    <div
+      className={`tab ${current === view ? "active" : ""}`}
+      role="tab"
+      tabIndex={0}
+      aria-selected={current === view}
+      onClick={() => onClick(view)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick(view);
+        }
+      }}
+    >
       {label}
       {count !== undefined && count > 0 && <span className="count">{count}</span>}
     </div>

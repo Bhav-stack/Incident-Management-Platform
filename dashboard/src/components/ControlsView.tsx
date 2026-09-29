@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type KillSwitches, type PolicyState, type ReplayStats } from "../lib/api";
+import { RowsSkeleton } from "./Skeleton";
 
 // Live control surface: kill switches and policy toggles are Redis-backed in
 // incident-svc and take effect immediately (checked in the propose and
@@ -53,7 +54,9 @@ export default function ControlsView() {
         <div>
           <div className="card">
             <div className="card-head"><h2>Kill switches</h2><div className="hint">redis · checked before propose &amp; execute</div></div>
-            {kill === null && <EmptyNote text={offline ? "incident-svc unreachable" : "loading"} />}
+            {kill === null && (offline
+              ? <EmptyNote text="incident-svc unreachable" />
+              : <RowsSkeleton rows={3} label="Loading kill switches" />)}
             {kill && (
               <>
                 <SwitchRow name="Global auto-recovery" desc="Rejects all proposals · no actions execute"
@@ -68,7 +71,9 @@ export default function ControlsView() {
 
           <div className="card" style={{ marginTop: 20 }}>
             <div className="card-head"><h2>Autonomy policy</h2><div className="hint">per-risk-tier gates</div></div>
-            {policy === null && <EmptyNote text={offline ? "incident-svc unreachable" : "loading"} />}
+            {policy === null && (offline
+              ? <EmptyNote text="incident-svc unreachable" />
+              : <RowsSkeleton rows={2} label="Loading autonomy policy" />)}
             {policy && (
               <>
                 <SwitchRow name="Shadow mode" desc="Agent proposes · nothing executes · proposals scored offline"
@@ -91,13 +96,23 @@ export default function ControlsView() {
                 {policy && Object.entries(policy.confidenceMinimums).map(([action, min]) => (
                   <tr key={action}>
                     <td>{action}</td>
-                    <td className="gate">{action === "rollback_deploy" || action === "kill_instance" ? "human · 2-person prod" : action === "clear_cache" ? "auto (post-shadow)" : "human approval"}</td>
+                    <td className="gate">{policy.autoApproveLow && action === "clear_cache" ? "auto when LOW + thresholds clear" : "human approval"}</td>
                     <td>{min.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {policy && <div style={{ padding: "4px 20px 12px" }}><span className="sample-note">min evidence {policy.minEvidenceSignals} signals per proposal</span></div>}
+            {/* Rendered from the running policy, not from a mockup: the two-person
+                tiers and the evidence minimum are the values the backend enforces. */}
+            {policy && (
+              <div style={{ padding: "4px 20px 12px" }}>
+                <span className="sample-note">
+                  min evidence {policy.minEvidenceSignals} signals per proposal
+                  {policy.twoPersonLevels.length > 0 &&
+                    ` · two-person approval for ${policy.twoPersonLevels.join(", ")} risk`}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="card" style={{ marginTop: 20 }}>

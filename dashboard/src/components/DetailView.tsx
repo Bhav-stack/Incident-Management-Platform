@@ -4,11 +4,39 @@ import { api } from "../lib/api";
 import { countdown, timeOf } from "../lib/format";
 import { riskClass, sevClass, statusClass, timelineDotColor } from "../lib/ui";
 import { sampleTrace } from "../lib/sample";
+import { signOut } from "../lib/session";
 import { CheckIcon, XIcon } from "./Icons";
+import OperatorSession from "./OperatorSession";
 
 // Approval window shown to the operator. Mirrors proposal.ttl on the backend
 // (5 minutes); the backend remains the source of truth for expiry.
 const PROPOSAL_TTL_MS = 5 * 60_000;
+
+/** True while a high-risk action is still short of its required signatures. */
+function needsSecondSignature(proposal: Proposal): boolean {
+  const required = proposal.approvalsRequired ?? 1;
+  return required > 1 && (proposal.approvals?.length ?? 0) < required;
+}
+
+/** Surfaces the backend's reason instead of a bare status code. */
+async function decisionError(res: Response): Promise<string> {
+  if (res.status === 401) {
+    // The token was rejected: expired, or signed by something this control
+    // plane no longer trusts. Holding on to it would just fail again.
+    signOut();
+    return "Your operator session is no longer valid. Sign in again, or continue as the shared client identity.";
+  }
+  try {
+    const body = await res.json();
+    const detail = typeof body?.message === "string" ? body.message : null;
+    if (detail) return `${detail} (${res.status})`;
+  } catch {
+    // Non-JSON error body; fall through to the generic message.
+  }
+  return res.status === 403
+    ? "Refused (403). This action needs two named operators, and the credential presented was not one. Sign in with an operator key."
+    : `Decision failed (${res.status}). The proposal may already be decided.`;
+}
 
 interface Props {
   incident: Incident;
@@ -30,12 +58,19 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
     setBusy(true);
     try {
       const res = approve
-        ? await api.approve(proposal.externalId, "dashboard")
-        : await api.reject(proposal.externalId, "dashboard");
+        ? await api.approve(proposal.externalId)
+        : await api.reject(proposal.externalId);
       setDecision(
         res.ok
-          ? { ok: true, text: approve ? `Approved · proposal ${proposal.externalId} queued for execution` : `Rejected · proposal ${proposal.externalId} closed` }
-          : { ok: false, text: `Decision failed (${res.status}). The proposal may already be decided.` },
+          ? {
+              ok: true,
+              text: approve
+                ? needsSecondSignature(proposal)
+                  ? `Signature recorded · proposal ${proposal.externalId} still needs a second operator`
+                  : `Approved · proposal ${proposal.externalId} queued for execution`
+                : `Rejected · proposal ${proposal.externalId} closed`,
+            }
+          : { ok: false, text: await decisionError(res) },
       );
     } catch {
       setDecision({ ok: false, text: "Decision failed. Is incident-svc reachable?" });
@@ -47,6 +82,13 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
   const ttlDeadline = proposal
     ? new Date(proposal.createdAt).getTime() + PROPOSAL_TTL_MS
     : 0;
+
+  /** Renders every verified approver, not just the last one. */
+  const approverList = (p: Proposal) => {
+    const names = (p.approvals ?? []).map((a) => a.operator);
+    if (names.length < 2) return null;
+    return <> with {names.join(" + ")}</>;
+  };
 
   return (
     <section className="view active">
@@ -127,6 +169,18 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
                 <div style={{ marginTop: 12 }}>
                   <div className="kv"><span className="k">Risk tier</span><span className={`v ${riskClass(proposal.riskLevel)}`}>{proposal.riskLevel}</span></div>
                   <div className="kv"><span className="k">Status</span><span className="v">{proposal.status}</span></div>
+                  {/* High-risk actions need two distinct operators, so the
+                      signature count is part of the decision surface. */}
+                  {(proposal.approvalsRequired ?? 1) > 1 && (
+                    <div className="kv">
+                      <span className="k">Signatures</span>
+                      <span className="v">
+                        {proposal.approvals?.length ?? 0} of {proposal.approvalsRequired}
+                        {(proposal.approvals?.length ?? 0) > 0 &&
+                          ` · ${(proposal.approvals ?? []).map((a) => a.operator).join(", ")}`}
+                      </span>
+                    </div>
+                  )}
                   <div className="kv"><span className="k">Reversibility</span><span className="v">verification-gated</span></div>
                   <div className="kv"><span className="k">Evidence signals</span><span className="v">{evidenceOf(proposal).length}</span></div>
                   <div className="kv"><span className="k">Kill switch</span><span className="v on">armed / off</span></div>
@@ -153,6 +207,11 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
                       <div className="lbl">Approval window</div>
                       <div className="num">{countdown(ttlDeadline, now)}</div>
                     </div>
+                    {/* The signature is a person's, so the person signs in
+                        here. Without a token the proxy's shared key signs
+                        instead, which is enough for one signature and not for
+                        two. */}
+                    <OperatorSession variant="panel" />
                     <div className="btn-row">
                       <button className="btn approve" disabled={busy} onClick={() => void decide(true)}><CheckIcon /> Approve</button>
                       <button className="btn reject" disabled={busy} onClick={() => void decide(false)}><XIcon /> Reject</button>
@@ -165,6 +224,7 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
                 {proposal.status !== "PENDING" && (
                   <div className="decision-msg">
                     Decided {proposal.status.toLowerCase()} by {proposal.decidedBy ?? "system"}
+                    {approverList(proposal)}
                     {proposal.decidedAt ? ` at ${timeOf(proposal.decidedAt)}` : ""}
                   </div>
                 )}

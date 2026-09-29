@@ -45,6 +45,12 @@ export interface IncidentStateEvent {
   occurredAt: string;
 }
 
+export interface Approval {
+  operator: string;
+  /** Absent on the live feed, which carries names only. */
+  at?: string;
+}
+
 export interface Proposal {
   id: number;
   externalId: string;
@@ -57,6 +63,10 @@ export interface Proposal {
   createdAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
+  // Verified operator identities recorded so far, in order. High-risk actions
+  // need two distinct operators before the command is released.
+  approvals?: Approval[];
+  approvalsRequired?: number;
 }
 
 export interface ProposalMessage {
@@ -70,6 +80,8 @@ export interface ProposalMessage {
   createdAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
+  approvals: string[];
+  approvalsRequired: number;
 }
 
 export interface TimelineEvent {
