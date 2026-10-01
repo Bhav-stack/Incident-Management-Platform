@@ -54,49 +54,69 @@ second was a saturated rig and the first was arithmetic.
 ## Results
 
 `accepted = received - deduplicated`, and accepted events are fully accounted for
-as `ordered + dropped`.
+as `ordered + dropped`. Over the whole run: 756,498 received, 75,497 duplicates,
+681,001 ordered, and zero dropped by any of the three counters.
 
 | offered | accepted | ordered | due by end | kept up | drain rate | dropped |
 |---|---|---|---|---|---|---|
-| 200/s | 5,453 | 5,453 | 4,800 | 93% | 240/s | 0 |
-| 1,000/s | 27,059 | 27,059 | 24,000 | 94% | 1,188/s | 0 |
-| 2,000/s | 54,069 | 54,069 | 48,000 | 93% | 2,331/s | 0 |
-| 5,000/s | 135,237 | 135,237 | 120,000 | 92% | 6,274/s | 0 |
-| 7,000/s | 189,060 | 189,060 | 168,000 | 96% | 8,254/s | 0 |
-| 10,000/s | 270,077 | 270,077 | 240,000 | 74% | 9,729/s | 0 |
+| 200/s | 5,513 | 5,513 | 4,800 | 95% | 253/s | 0 |
+| 1,000/s | 27,063 | 27,063 | 24,000 | 96% | 1,023/s | 0 |
+| 2,000/s | 53,985 | 53,985 | 48,000 | 96% | 2,030/s | 0 |
+| 5,000/s | 135,144 | 135,144 | 120,000 | 94% | 7,447/s | 0 |
+| 7,000/s | 189,182 | 189,182 | 168,000 | 94% | 6,436/s | 0 |
+| 10,000/s | 270,114 | 270,114 | 240,000 | 96% | 8,733/s | 0 |
 
-**Nothing was dropped at any step, including 10,000/s.** `ordered` equals
-`accepted` everywhere; the pipeline never had to discard a straggler or overflow a
-queue. What changes at 10,000/s is that it stops keeping up: it completes 74% of
-the stream while it is being produced, has to drain the rest afterwards, and that
-backlog is what pushes `event_time -> rule` from 5.5s to 10.4s.
+**Nothing was dropped at any step, including 10,000/s, and nothing accumulated.**
+`ordered` equals `accepted` at every step and the totals close exactly. The
+kept-up deficit is 4-6% at 200/s and at 10,000/s alike — constant across a 50x
+range of offered rates, which is what ripple looks like rather than a backlog
+that grows with load. At 10,000/s the pipeline had completed 230,287 of the
+240,000 events due by the end of the phase; the remainder, plus the 60,000-event
+tail still inside the ordering window, drained in eight seconds.
+
+The drain figure is a lower bound rather than a capacity measurement: the
+catch-up clock starts when the producer stops, and the newest events still have
+up to five seconds of ordering window to serve, so at high rates part of the
+apparent catch-up work could not have completed any earlier. At the low steps it
+lands just above the offered rate (253/s against 200/s); at 10,000/s it reads
+8,733/s, below the offered rate, but not because the pipeline is slower than
+that — a fifth of the phase's stream was still inside its window when the
+producer stopped.
 
 Per-stage mean latency for each step, exact from timer `count`/`sum` deltas:
 
 | offered | dedup (ms/event) | buffer offer (ms) | rule (ms/sample) | `event_time -> rule` (ms) |
 |---|---|---|---|---|
-| 200/s | 0.511 | 0.003 | 0.073 | 5,520 |
-| 1,000/s | 0.141 | 0.002 | 0.015 | 5,514 |
-| 2,000/s | 0.094 | 0.002 | 0.008 | 5,517 |
-| 5,000/s | 0.083 | 0.002 | 0.006 | 5,541 |
-| 7,000/s | 0.083 | 0.002 | 0.006 | 5,563 |
-| 10,000/s | 0.079 | 0.002 | 0.006 | 10,448 |
+| 200/s | 0.754 | 0.003 | 0.124 | 5,512 |
+| 1,000/s | 0.238 | 0.002 | 0.028 | 5,521 |
+| 2,000/s | 0.155 | 0.002 | 0.016 | 5,523 |
+| 5,000/s | 0.124 | 0.003 | 0.009 | 5,557 |
+| 7,000/s | 0.100 | 0.003 | 0.006 | 5,563 |
+| 10,000/s | 0.133 | 0.005 | 0.007 | 5,618 |
+
+The 200/s step is the first thirty seconds of the JVM's life, so every stage
+reads higher there (JIT warm-up); from there the means fall as the rate rises,
+the opposite of a saturated stage. `event_time -> rule` is flat at 5.5s at every
+rate, and the part above the deliberate 5s ordering window does not grow with
+load (62ms at 200/s, 618ms at 10,000/s).
 
 Whole-run percentiles (Micrometer publishes them over a rolling window, so the
-final table describes the end of the run — which is the 10,000/s step, backlog
-included):
+final table describes the end of the run — which is the 10,000/s step and its
+drain):
 
 | stage | p50 | p95 | p99 | max |
 |---|---|---|---|---|
-| dedup | 0.072ms | 0.145ms | 0.178ms | 2.31ms |
-| buffer offer | 0.001ms | 0.004ms | 0.005ms | 12.2ms |
-| rule | 0.006ms | 0.010ms | 0.012ms | 0.06ms |
-| `event_time -> rule` | 11.0s | 13.2s | 13.2s | 13.5s |
+| dedup | 0.137ms | 0.219ms | 0.342ms | 46.1ms |
+| buffer offer | 0.002ms | 0.005ms | 0.010ms | 19.8ms |
+| rule | 0.006ms | 0.012ms | 0.014ms | 13.1ms |
+| `event_time -> rule` | 5.37s | 5.91s | 6.17s | 6.32s |
 
-Up to 7,000/s, `event_time -> rule` is flat at 5.5s — the deliberate 5s ordering
-window plus ~0.5s of production-to-rule delay — and it does not grow with load.
-It used to grow with load (5.7s at 200/s to 14.2s at 1,000/s) because events
-queued behind the rule work; that queueing is gone.
+At the highest rate in the ladder the p99 of `event_time -> rule` is 6.17s
+against a 5s ordering window: under 1.2s of it is production-to-rule delay, and
+the maximum over the whole run is 6.32s. It used to grow with load (5.7s at
+200/s to 14.2s at 1,000/s) because events queued behind the rule work; that
+queueing is gone, and so is the 10.4s tail the previous numbers showed at
+10,000/s.
 
 ## Where the ceiling actually is
 
@@ -120,8 +140,19 @@ generator defect, not a pipeline one, but it was the ceiling. The generator now
 accumulates and compresses like a real producer
 (`linger.ms=50`, `batch.size=262144`, `compression.type=lz4`,
 `max.in.flight.requests.per.connection=5`), which took the 10,000/s step from 40%
-to 54% kept up and roughly halved broker CPU. The remaining gap is the rig:
-single broker, single node, producer-and-consumer on one box.
+to 54% kept up and roughly halved broker CPU. The generator now meets its target:
+300,000 events written in 30.8s against a 30s phase.
+
+Two further defects came out of those passes, both in the flush path and both
+fixed. A sink call that threw lost the whole ordered batch, unaccounted for; it
+is now counted per event (`aegis_events_dropped_sink_total`) and logged. A failed
+anomaly insert threw out of the flush and cost whatever shared the batch with
+it; it is now contained to the one anomaly (`aegis_anomalies_failed_total`). The
+ingest database had also lost its schema under a running service — 23
+`relation "anomalies" does not exist` failures were reported — so those passes
+overlapped with a broken runtime rather than measuring the code as it is now. The table above is the ladder after Flyway
+recreated the schema, the service was restarted, and both failures were
+contained.
 
 ## What this run changed
 
@@ -137,6 +168,14 @@ against the events due by the end of the phase, which is what makes 92% at
 `generator_wall_ms` say whether a step was limited by the generator, the broker,
 or the pipeline; `generator_wall_ms` also catches the case where the generator is
 throttled by its own pipe (it would exceed the phase length).
+
+**4. The flush path no longer loses work silently when a downstream call
+fails.** `OutOfOrderBuffer.flush` counts a failed sink batch per event and logs
+it, instead of letting the exception escape a scheduled flush and take the batch
+with it; `AnomalyDetector.persistAndPublish` contains a failed durable insert and
+increments `aegis_anomalies_failed_total`. Both have tests. They exist because
+both were live in the earlier passes, which is the argument for a counter over a
+comment.
 
 ## What changed before this run
 
@@ -181,32 +220,42 @@ never queues behind the Kafka lag sampler.
 
 ## Where the ceiling is now
 
-**The pipeline holds up to about 7,000 events/s and starts falling behind at
-10,000.** Sustained, on this machine: 7,000/s at 96% kept up with zero loss and
-5.5s staleness. At 10,000/s it keeps 74%, drains the remainder at 9,729/s (which
-is roughly its own capacity — during the drain the producer is idle), and its
-signals are 10.4s stale instead of 5.5s.
+**The ladder did not find a ceiling at or below 10,000 events/s.** Every step
+kept up, the deficit was the same at 200/s as at 10,000/s rather than widening,
+nothing was dropped, and staleness stayed inside 5.51-5.62s at every rate. At
+10,000/s the p99 of `event_time -> rule` was 6.17s against a 5s ordering window,
+so under 1.2s of the tail was pipeline. What this run cannot say is how far past
+10,000/s the headroom goes, because 10,000/s is where the ladder ends.
 
-Nothing in the service is saturated at that point: ingest-svc uses under one core,
-Redis under 2%, and the stage means stay flat (dedup 0.079ms/event, rule
-0.006ms/sample). The step is limited by the single-node rig — one broker doing
-both the ingest and the fan-out, on the same box as the producer and the consumer.
-A real deployment spreads those across brokers and hosts; the honest reading of
-this ladder is that ~7,000/s is a floor set by the test rig, and that the drop
-counters stay at zero either way.
+Three bounds on the result, stated up front:
 
-`event_time -> rule` of 5.5s at every rate up to 7,000/s is a product decision,
-not a limit: `ingest.buffer.window` is 5s, so the platform is deliberately blind
-for five seconds to buy ordering. If that is too slow for a signal, shorten the
-window and accept more out-of-order arrivals.
+* each step lasts 30 seconds. That is long enough for a backlog to form and
+  clear, and too short to call a soak;
+* the generator, one broker, three partitions and the consumer share a 16-core
+  host. The producer hit its target within 3% (30.8s of wall time for a 30s
+  phase), which is what the batching change bought, but the steps still are not
+  a distributed deployment;
+* the drain rates are lower bounds, not capacities, for the window reason above.
+
+So: **10,000/s with zero loss is measured; a sustained ceiling above that is
+not.** A ten-minute soak at 10,000/s, and a 15,000/s step with a longer phase,
+are what would turn the first figure into the second.
+
+`event_time -> rule` of 5.5s at every rate is a product decision, not a limit:
+`ingest.buffer.window` is 5s, so the platform is deliberately blind for five
+seconds to buy ordering. If that is too slow for a signal, shorten the window
+and accept more out-of-order arrivals.
 
 ## Next step if more throughput is needed
 
 Ranked by effect per unit of risk:
 
-1. **Measure on a rig that is not the ceiling.** A broker with its own host (or
-   three brokers), and a generator outside the container. Until then, the
-   `drain_rate` column is the better capacity figure than the phase numbers.
+1. **Soak instead of laddering.** The ladder now holds 10,000/s in 30-second
+   steps; it cannot show what happens after ten minutes at that rate, and the
+   numbers above stop at the last rung. Ten minutes at 10,000/s and a 15,000/s
+   step, on a rig where the broker is not sharing the host, is the measurement
+   that would answer it. Until then, quote 10,000/s with zero loss as measured
+   and the drain rates as floors, not as a capacity.
 2. **Reduce the dedup round trip — the only Redis call left on the hot path.**
    Options: raise `max.poll.records` so one pipeline covers more events, or move
    from per-key `SETNX` to a time-bucketed set claimed by one script per batch.

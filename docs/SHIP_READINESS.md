@@ -69,9 +69,12 @@ dumps — is verified.
   dedup and rule state from one Redis round trip per event to one per poll batch,
   with the buffer cap, partition count and listener concurrency made explicit.
   See §3.
-- **Ingest observability**: ordered / straggler-drop / overflow-drop counters so
-  overload is visible rather than silent; per-topic Kafka lag gauge; per-stage
-  timers (`aegis_ingest_{dedup,buffer_offer,rule,event_to_rule}_seconds`).
+- **Ingest observability**: ordered / straggler-drop / overflow-drop counters,
+  plus drops caused by a failed sink call and failed anomaly writes
+  (`aegis_events_dropped_sink_total`, `aegis_anomalies_failed_total`), so
+  overload and downstream failure are visible rather than silent; per-topic
+  Kafka lag gauge; per-stage timers
+  (`aegis_ingest_{dedup,buffer_offer,rule,event_to_rule}_seconds`).
 - **Feed hardening**: single-use STOMP ticket from `POST /api/ws-ticket` in the
   CONNECT frame, so `/ws` is not readable by anything that can reach the port.
 - **UI**: Apple-official light system, no purple / pills / emoji / em dashes;
@@ -82,23 +85,32 @@ dumps — is verified.
 
 ## 3. Measured limits
 
-- **Ingest holds ~7,000 events/s and falls behind at 10,000/s**, with **zero
-  events dropped at any rate up to 10,000/s**. Up to 7,000/s `event_time -> rule`
-  is flat at 5.5s (5s of it the deliberate ordering window) and dedup is
-  0.083 ms/event; at 10,000/s it completes 74% of the stream while it is being
-  produced, drains the rest at 9,729/s, and staleness rises to 10.4s.
-- **The 10,000/s step is limited by the test rig, not the service.** While it
-  fell behind, ingest-svc used under one core of sixteen (0.076 of
-  `process_cpu_usage`), Redis stayed under 2% (8.77 µs per `SET` by
-  `INFO commandstats`), and the broker saturated at 652% CPU because the load
-  generator initially fed it one produce request per record. Batching and
-  compressing the generator took the step from 40% to 54% kept up and halved
-  broker CPU; the remainder is one broker, on one host, producing and consuming.
+- **Ingest holds 10,000 events/s in 30-second steps with zero events dropped**,
+  and that is where the ladder ends rather than where the pipeline broke: every
+  step kept up 94-96% of the events due by the end of its phase, a deficit that
+  does not grow with the offered rate; `received = deduplicated + ordered` closed
+  exactly over the run (756,498 = 75,497 + 681,001); and `event_time -> rule`
+  stayed within 5.51-5.62s at every rate from 200/s to 10,000/s, i.e. the 5s
+  ordering window plus under 1.2s of pipeline at the 99th percentile. Method and
+  raw output: [`docs/LOADTEST.md`](LOADTEST.md), `docs/loadtest-ingest.txt`.
+- **Earlier, lower ceiling numbers were the rig and a broken run, not the
+  service.** While those passes fell behind, ingest-svc used under one core of
+  sixteen (0.076 of `process_cpu_usage`), Redis stayed under 2% (8.77 µs per
+  `SET` by `INFO commandstats`), and the broker saturated at 652% CPU because the
+  load generator fed it one produce request per record; batching and compressing
+  the generator like a real producer fixed that half. The other half was the run
+  environment: the ingest database had lost its schema (23
+  `relation "anomalies" does not exist` failures were reported) and the flush
+  path could lose an ordered batch, or an anomaly, when a downstream call threw.
+  Both are now contained and counted, with tests, and the ladder above is the
+  first clean run.
 - **Overload degrades by dropping, not delaying** — a deliberate bounded-memory
-  policy. The drop counters (`aegis_events_dropped_{straggler,overflow}_total`)
-  make it visible, and the ladder exercises it: in the earlier configuration a
-  mis-sized queue cap dropped 22,979 events at 1,000/s, which is exactly the
-  failure this metric exists to surface.
+  policy, and a failing downstream call costs the work it touched rather than
+  vanishing. The counters
+  (`aegis_events_dropped_{straggler,overflow,sink}_total`,
+  `aegis_anomalies_failed_total`) make both visible, and the ladder exercises it:
+  in the earlier configuration a mis-sized queue cap dropped 22,979 events at
+  1,000/s, which is exactly the failure this metric exists to surface.
 
 ## 4. What is left, and the next big step
 
@@ -109,10 +121,12 @@ Ranked by blast radius.
    bridge network. Reaching any of them from off-host is enough to read or
    rewrite incident history. Managed services with TLS + SASL/ACLs, credentials
    from a secret manager, and a private network for the Prometheus scrape.
-2. **Measure on a rig that is not the ceiling.** The ladder cannot tell whether
-   the pipeline's own limit is 7,000/s or 30,000/s until the broker, the
-   generator and the consumer stop sharing a machine. Until then, the
-   `drain_rate` column is the better capacity figure than the phase numbers.
+2. **Find the ceiling with a soak, not a ladder.** The ladder now holds 10,000/s
+   in 30-second steps; it cannot say what happens after ten minutes there, and the
+   drain rates quoted at the top two steps are lower bounds because events
+   produced in the last five seconds cannot complete until their window elapses.
+   Ten minutes at 10,000/s and a 15,000/s step, with the broker off the producer
+   and consumer host, is the next honest measurement.
 3. **Multi-instance WebSocket.** The STOMP broker is the in-process simple
    broker with in-memory session tracking, so a second incident-svc instance
    would not receive the other's frames. A relay and a shared session store are

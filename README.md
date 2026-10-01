@@ -126,7 +126,7 @@ docker compose up -d prometheus grafana   # or: make up (starts all)
 ```
 
 Counters: `aegis_events_{emitted,received,deduplicated,ordered}`,
-`aegis_events_dropped_{straggler,overflow}`, `aegis_anomalies_emitted`,
+`aegis_events_dropped_{straggler,overflow,sink}`, `aegis_anomalies_{emitted,failed}`,
 `aegis_incidents_{opened,resolved}`, `aegis_proposals_{created,approved,rejected,expired,auto_approved}`,
 `aegis_actions_{executed,verified,verification_failed,rolled_back,escalated}`. The
 provisioned dashboard (`observability/grafana/`) shows pipeline throughput, the
@@ -145,31 +145,43 @@ analysis in [`docs/LOADTEST.md`](docs/LOADTEST.md)):
     --out docs/loadtest-ingest.txt
 ```
 
-| offered | accepted | ordered | kept up | dropped (straggler + overflow) |
+| offered | accepted | ordered | kept up | dropped (straggler/overflow/sink) |
 | --- | --- | --- | --- | --- |
-| 200/s | 5,453 | 5,453 | 93% | 0 |
-| 1,000/s | 27,059 | 27,059 | 94% | 0 |
-| 2,000/s | 54,069 | 54,069 | 93% | 0 |
-| 5,000/s | 135,237 | 135,237 | 92% | 0 |
-| 7,000/s | 189,060 | 189,060 | 96% | 0 |
-| 10,000/s | 270,077 | 270,077 | 74% | 0 |
+| 200/s | 5,513 | 5,513 | 95% | 0 |
+| 1,000/s | 27,063 | 27,063 | 96% | 0 |
+| 2,000/s | 53,985 | 53,985 | 96% | 0 |
+| 5,000/s | 135,144 | 135,144 | 94% | 0 |
+| 7,000/s | 189,182 | 189,182 | 94% | 0 |
+| 10,000/s | 270,114 | 270,114 | 96% | 0 |
 
 `kept up` is what completed against what was due by the end of the phase, which
 subtracts the pipeline's deliberate 5s ordering window and 1s flush tick.
 
-**Nothing is dropped at any rate, including 10,000/s.** `ordered` equals
-`accepted` at every step: the pipeline never discards a straggler or overflows a
-queue. Up to 7,000 events/s it keeps up, with `event_time -> rule` staleness flat
-at 5.5s and per-stage means flat (dedup 0.083ms/event, buffer offer 0.002ms, rule
-0.006ms/sample). At 10,000/s it completes 74% while the stream is being produced,
-drains the rest at 9,729/s, and its signals are 10.4s stale instead of 5.5s.
+**Nothing is dropped at any rate through 10,000/s, and nothing accumulates.**
+`ordered` equals `accepted` at every step, `received = deduplicated + ordered`
+over the whole run (756,498 = 75,497 + 681,001), and `event_time -> rule`
+staleness stays within 5.51-5.62s at every rate from 200/s to 10,000/s. The
+per-stage means fall as the rate rises rather than growing with it (dedup
+0.238ms/event at 1,000/s down to 0.100-0.133ms above it, rule 0.028ms/sample down
+to 0.006-0.009ms; the 200/s step is the JVM's first thirty seconds and reads
+higher). At 10,000/s the pipeline completed 230,287 of the 240,000 events due by
+the end of the phase, and the rest of the stream, including the 60,000-event tail
+still inside the ordering window, drained in eight seconds at 8,733/s. The 94-96%
+kept-up figures do not get worse as the offered rate goes up, which is what
+ripple looks like rather than a backlog.
 
-The limit at 10,000/s is the test rig, not the service: ingest-svc used under one
-core of sixteen while it fell behind, Redis stayed under 2% (`INFO commandstats`:
-8.77us per `SET`), and the Kafka broker saturated at 652% CPU because the load
-generator initially fed it one produce request per record. Batching and
-compressing the generator took that step from 40% to 54% kept up and halved
-broker CPU. The measurements and the reasoning are in
+**This ladder stops at 10,000 events/s; it did not find the pipeline's ceiling.**
+Earlier passes that read 40-74% here were measuring a rig and a run that were not
+clean: the Kafka broker saturated at 652% CPU because the load generator
+initially fed it one produce request per record rather than batching and
+compressing like a real producer (`linger.ms=50`, `batch.size=262144`, lz4, five
+requests in flight), and the ingest database lost its schema while those passes
+were being run (23 `relation "anomalies" does not exist` failures), where a
+failed insert could throw out of the flush path. Both failure modes are now
+contained and counted
+(`aegis_events_dropped_sink_total`, `aegis_anomalies_failed_total`); with the
+schema intact and the generator no longer the bottleneck, the same ladder on the
+same host holds every step. The measurements and the reasoning are in
 [`docs/LOADTEST.md`](docs/LOADTEST.md).
 
 The ceiling used to be ~490 events/s: one Redis round trip per event in dedup

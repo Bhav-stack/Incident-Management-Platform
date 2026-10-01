@@ -8,86 +8,87 @@ means the event passed dedup, the out-of-order buffer and the rules.
 stream minus the 5s ordering window and the 1s flush tick,
 which a pipeline that is keeping up still has in flight when the phase ends.
 
-step offered=200/s generated_by_producer=6000 received=6000 deduplicated=547 ordered=5453
-     generator_wall_ms=30599 (the offered phase is 30000ms; a larger
+step offered=200/s generated_by_producer=6000 received=6078 deduplicated=565 ordered=5513
+     generator_wall_ms=30769 (the offered phase is 30000ms; a larger
          figure means the generator was throttled by its own pipe, not the pipeline)
-     ordered_by_end_of_phase=4484 = 4800 due by then, so 93% kept up
-         (149/s sustained, 75% of the whole stream; the rest is the
+     ordered_by_end_of_phase=4557 = 4800 due by then, so 95% kept up
+         (152/s sustained, 76% of the whole stream; the rest is the
          5s ordering window + 1s flush tick still in flight)
-     catch_up_ms=6313 drain_rate=240/s dropped_straggler=0 dropped_overflow=0 anomalies=0
-     mean aegis_ingest_dedup          0.511
+     catch_up_ms=5693 drain_rate=253/s dropped_straggler=0 dropped_overflow=0 dropped_sink=0 anomalies=4
+     mean aegis_ingest_dedup          0.754
      mean aegis_ingest_buffer_offer      0.003
-     mean aegis_ingest_rule           0.073
-     mean aegis_ingest_event_to_rule   5519.504
-step offered=1000/s generated_by_producer=30000 received=30000 deduplicated=2941 ordered=27059
-     generator_wall_ms=30576 (the offered phase is 30000ms; a larger
+     mean aegis_ingest_rule           0.124
+     mean aegis_ingest_event_to_rule   5511.858
+step offered=1000/s generated_by_producer=30000 received=30090 deduplicated=3027 ordered=27063
+     generator_wall_ms=30802 (the offered phase is 30000ms; a larger
          figure means the generator was throttled by its own pipe, not the pipeline)
-     ordered_by_end_of_phase=22656 = 24000 due by then, so 94% kept up
-         (755/s sustained, 76% of the whole stream; the rest is the
+     ordered_by_end_of_phase=22976 = 24000 due by then, so 96% kept up
+         (766/s sustained, 77% of the whole stream; the rest is the
          5s ordering window + 1s flush tick still in flight)
-     catch_up_ms=6183 drain_rate=1188/s dropped_straggler=0 dropped_overflow=0 anomalies=0
-     mean aegis_ingest_dedup          0.141
+     catch_up_ms=6863 drain_rate=1023/s dropped_straggler=0 dropped_overflow=0 dropped_sink=0 anomalies=4
+     mean aegis_ingest_dedup          0.238
      mean aegis_ingest_buffer_offer      0.002
-     mean aegis_ingest_rule           0.015
-     mean aegis_ingest_event_to_rule   5513.640
-step offered=2000/s generated_by_producer=60000 received=60000 deduplicated=5931 ordered=54069
-     generator_wall_ms=30747 (the offered phase is 30000ms; a larger
+     mean aegis_ingest_rule           0.028
+     mean aegis_ingest_event_to_rule   5520.727
+step offered=2000/s generated_by_producer=60000 received=60084 deduplicated=6099 ordered=53985
+     generator_wall_ms=30964 (the offered phase is 30000ms; a larger
          figure means the generator was throttled by its own pipe, not the pipeline)
-     ordered_by_end_of_phase=44533 = 48000 due by then, so 93% kept up
-         (1484/s sustained, 74% of the whole stream; the rest is the
+     ordered_by_end_of_phase=46146 = 48000 due by then, so 96% kept up
+         (1538/s sustained, 77% of the whole stream; the rest is the
          5s ordering window + 1s flush tick still in flight)
-     catch_up_ms=6636 drain_rate=2331/s dropped_straggler=0 dropped_overflow=0 anomalies=0
-     mean aegis_ingest_dedup          0.094
+     catch_up_ms=6824 drain_rate=2030/s dropped_straggler=0 dropped_overflow=0 dropped_sink=0 anomalies=4
+     mean aegis_ingest_dedup          0.155
      mean aegis_ingest_buffer_offer      0.002
-     mean aegis_ingest_rule           0.008
-     mean aegis_ingest_event_to_rule   5516.797
-step offered=5000/s generated_by_producer=150000 received=150000 deduplicated=14763 ordered=135237
-     generator_wall_ms=30646 (the offered phase is 30000ms; a larger
+     mean aegis_ingest_rule           0.016
+     mean aegis_ingest_event_to_rule   5522.984
+step offered=5000/s generated_by_producer=150000 received=150078 deduplicated=14934 ordered=135144
+     generator_wall_ms=30793 (the offered phase is 30000ms; a larger
          figure means the generator was throttled by its own pipe, not the pipeline)
-     ordered_by_end_of_phase=110806 = 120000 due by then, so 92% kept up
-         (3694/s sustained, 74% of the whole stream; the rest is the
+     ordered_by_end_of_phase=112520 = 120000 due by then, so 94% kept up
+         (3751/s sustained, 75% of the whole stream; the rest is the
          5s ordering window + 1s flush tick still in flight)
-     catch_up_ms=6247 drain_rate=6274/s dropped_straggler=0 dropped_overflow=0 anomalies=0
-     mean aegis_ingest_dedup          0.083
-     mean aegis_ingest_buffer_offer      0.002
+     catch_up_ms=5033 drain_rate=7447/s dropped_straggler=0 dropped_overflow=0 dropped_sink=0 anomalies=6
+     mean aegis_ingest_dedup          0.124
+     mean aegis_ingest_buffer_offer      0.003
+     mean aegis_ingest_rule           0.009
+     mean aegis_ingest_event_to_rule   5556.536
+step offered=7000/s generated_by_producer=210000 received=210084 deduplicated=20902 ordered=189182
+     generator_wall_ms=30706 (the offered phase is 30000ms; a larger
+         figure means the generator was throttled by its own pipe, not the pipeline)
+     ordered_by_end_of_phase=157926 = 168000 due by then, so 94% kept up
+         (5264/s sustained, 75% of the whole stream; the rest is the
+         5s ordering window + 1s flush tick still in flight)
+     catch_up_ms=8091 drain_rate=6436/s dropped_straggler=0 dropped_overflow=0 dropped_sink=0 anomalies=4
+     mean aegis_ingest_dedup          0.100
+     mean aegis_ingest_buffer_offer      0.003
      mean aegis_ingest_rule           0.006
-     mean aegis_ingest_event_to_rule   5540.642
-step offered=7000/s generated_by_producer=210000 received=210000 deduplicated=20940 ordered=189060
-     generator_wall_ms=30716 (the offered phase is 30000ms; a larger
+     mean aegis_ingest_event_to_rule   5563.454
+step offered=10000/s generated_by_producer=300000 received=300084 deduplicated=29970 ordered=270114
+     generator_wall_ms=30836 (the offered phase is 30000ms; a larger
          figure means the generator was throttled by its own pipe, not the pipeline)
-     ordered_by_end_of_phase=160465 = 168000 due by then, so 96% kept up
-         (5349/s sustained, 76% of the whole stream; the rest is the
+     ordered_by_end_of_phase=230287 = 240000 due by then, so 96% kept up
+         (7676/s sustained, 77% of the whole stream; the rest is the
          5s ordering window + 1s flush tick still in flight)
-     catch_up_ms=6001 drain_rate=8254/s dropped_straggler=0 dropped_overflow=0 anomalies=0
-     mean aegis_ingest_dedup          0.083
-     mean aegis_ingest_buffer_offer      0.002
-     mean aegis_ingest_rule           0.006
-     mean aegis_ingest_event_to_rule   5563.371
-step offered=10000/s generated_by_producer=300000 received=300000 deduplicated=29923 ordered=270077
-     generator_wall_ms=31001 (the offered phase is 30000ms; a larger
-         figure means the generator was throttled by its own pipe, not the pipeline)
-     ordered_by_end_of_phase=177800 = 240000 due by then, so 74% kept up
-         (5927/s sustained, 59% of the whole stream; the rest is the
-         5s ordering window + 1s flush tick still in flight)
-     catch_up_ms=12560 drain_rate=9729/s dropped_straggler=0 dropped_overflow=0 anomalies=0
-     mean aegis_ingest_dedup          0.079
-     mean aegis_ingest_buffer_offer      0.002
-     mean aegis_ingest_rule           0.006
-     mean aegis_ingest_event_to_rule  10447.944
+     catch_up_ms=7983 drain_rate=8733/s dropped_straggler=0 dropped_overflow=0 dropped_sink=0 anomalies=4
+     mean aegis_ingest_dedup          0.133
+     mean aegis_ingest_buffer_offer      0.005
+     mean aegis_ingest_rule           0.007
+     mean aegis_ingest_event_to_rule   5618.299
 
 stage (whole run)          p50 (ms)   p95 (ms)   p99 (ms)   max (ms)
-dedup                         0.072      0.145      0.178      2.314
-buffer_offer                  0.001      0.004      0.005     12.186
-rule                          0.006      0.010      0.012      0.058
-event_to_rule             11005.854  13153.337  13153.337  13522.635
+dedup                         0.137      0.219      0.342     46.108
+buffer_offer                  0.002      0.005      0.010     19.770
+rule                          0.006      0.012      0.014     13.057
+event_to_rule              5368.709   5905.580   6174.015   6315.993
 
 totals since the service started
-  received               : 756000
-  deduplicated           : 75045
-  ordered                : 680955
+  received               : 756498
+  deduplicated           : 75497
+  ordered                : 681001
   dropped (straggler)    : 0
   dropped (overflow)     : 0
-  anomalies emitted      : 0
+  dropped (sink failure) : 0
+  anomalies emitted      : 26
 
 reading the numbers
   keep-up                : ordered_by_end_of_phase against the events due by the end
