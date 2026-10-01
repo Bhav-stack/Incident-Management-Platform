@@ -249,6 +249,7 @@ DEDUP0=$(prom_counter aegis_events_deduplicated_total)
 ORDERED0=$(prom_counter aegis_events_ordered_total)
 STRAGGLER0=$(prom_counter aegis_events_dropped_straggler_total)
 OVERFLOW0=$(prom_counter aegis_events_dropped_overflow_total)
+SINK0=$(prom_counter aegis_events_dropped_sink_total)
 ANOMALIES0=$(prom_counter aegis_anomalies_emitted_total)
 
 log "load ladder: rates $RATES events/sec, ${PHASE_SECONDS}s per step, ${DUPLICATES}% duplicates, ${SPIKE}s breach spike"
@@ -267,6 +268,7 @@ for RATE in "${RATE_LIST[@]}"; do
   ORDER_BEFORE=$(prom_counter aegis_events_ordered_total)
   STRAG_BEFORE=$(prom_counter aegis_events_dropped_straggler_total)
   OVF_BEFORE=$(prom_counter aegis_events_dropped_overflow_total)
+  SINK_BEFORE=$(prom_counter aegis_events_dropped_sink_total)
   ANOM_BEFORE=$(prom_counter aegis_anomalies_emitted_total)
   START_MS=$(date +%s%3N)
 
@@ -296,7 +298,8 @@ for RATE in "${RATE_LIST[@]}"; do
     ACCEPT_D=$(( RECV_D - $(prom_counter aegis_events_deduplicated_total) + DEDUP_BEFORE ))
     DONE_D=$(( $(prom_counter aegis_events_ordered_total) - ORDER_BEFORE \
               + $(prom_counter aegis_events_dropped_straggler_total) - STRAG_BEFORE \
-              + $(prom_counter aegis_events_dropped_overflow_total) - OVF_BEFORE ))
+              + $(prom_counter aegis_events_dropped_overflow_total) - OVF_BEFORE \
+              + $(prom_counter aegis_events_dropped_sink_total) - SINK_BEFORE ))
     if [ "$RECV_D" -ge "$EXPECTED" ] && [ "$DONE_D" -ge "$ACCEPT_D" ]; then
       break
     fi
@@ -309,6 +312,7 @@ for RATE in "${RATE_LIST[@]}"; do
   ORDER_D=$(( $(prom_counter aegis_events_ordered_total) - ORDER_BEFORE ))
   STRAG_D=$(( $(prom_counter aegis_events_dropped_straggler_total) - STRAG_BEFORE ))
   OVF_D=$(( $(prom_counter aegis_events_dropped_overflow_total) - OVF_BEFORE ))
+  SINK_D=$(( $(prom_counter aegis_events_dropped_sink_total) - SINK_BEFORE ))
   ANOM_D=$(( $(prom_counter aegis_anomalies_emitted_total) - ANOM_BEFORE ))
 
   if [ "$RECV_D" -lt "$EXPECTED" ]; then
@@ -330,7 +334,7 @@ for RATE in "${RATE_LIST[@]}"; do
   KEEP_UP_PCT=$(awk -v n="$ORDERED_BY_END" -v t="$DUE" 'BEGIN{ printf "%.0f", (t == 0 ? 0 : n / t * 100) }')
   STREAM_PCT=$(awk -v n="$ORDERED_BY_END" -v t="$EXPECTED" 'BEGIN{ printf "%.0f", (t == 0 ? 0 : n / t * 100) }')
   CATCH_UP_MS=$(( ELAPSED_MS - PRODUCED_MS ))
-  DROP_D=$(( STRAG_D + OVF_D ))
+  DROP_D=$(( STRAG_D + OVF_D + SINK_D ))
 
   # Once the producer stops, the only thing left to do is drain the backlog, so
   # this is the pipeline's own rate with the broker and the generator out of the
@@ -352,7 +356,7 @@ for RATE in "${RATE_LIST[@]}"; do
     echo "     ordered_by_end_of_phase=$ORDERED_BY_END = $DUE due by then, so ${KEEP_UP_PCT}% kept up"
     echo "         (${KEEP_UP_RATE}/s sustained, ${STREAM_PCT}% of the whole stream; the rest is the"
     echo "         ${WINDOW_SECONDS}s ordering window + ${FLUSH_SECONDS}s flush tick still in flight)"
-    echo "     catch_up_ms=$CATCH_UP_MS drain_rate=$DRAIN dropped_straggler=$STRAG_D dropped_overflow=$OVF_D anomalies=$ANOM_D"
+    echo "     catch_up_ms=$CATCH_UP_MS drain_rate=$DRAIN dropped_straggler=$STRAG_D dropped_overflow=$OVF_D dropped_sink=$SINK_D anomalies=$ANOM_D"
     stage_means_ms "$SCRATCH/stages-before-$RATE.txt" | sed 's/^/     mean /'
   } | tee -a "$RESULTS"
 
@@ -389,6 +393,7 @@ printf '  deduplicated           : %s\n' "$(( $(prom_counter aegis_events_dedupl
 printf '  ordered                : %s\n' "$(( $(prom_counter aegis_events_ordered_total) - ORDERED0 ))"
 printf '  dropped (straggler)    : %s\n' "$(( $(prom_counter aegis_events_dropped_straggler_total) - STRAGGLER0 ))"
 printf '  dropped (overflow)     : %s\n' "$(( $(prom_counter aegis_events_dropped_overflow_total) - OVERFLOW0 ))"
+printf '  dropped (sink failure) : %s\n' "$(( $(prom_counter aegis_events_dropped_sink_total) - SINK0 ))"
 printf '  anomalies emitted      : %s\n' "$(( $(prom_counter aegis_anomalies_emitted_total) - ANOMALIES0 ))"
 echo
 echo "reading the numbers"

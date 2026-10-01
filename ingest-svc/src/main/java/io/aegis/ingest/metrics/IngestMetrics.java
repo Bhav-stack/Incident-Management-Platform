@@ -31,12 +31,14 @@ import org.springframework.stereotype.Component;
  * approximated from histogram buckets, so the numbers read straight off the
  * Prometheus endpoint are exact for this process.
  *
- * <p>It also counts the two ways an event can fail to reach the rules, because
+ * <p>It also counts every way an event can fail to reach the rules, because
  * the pipeline is deliberately allowed to drop events and those drops must be
  * visible rather than inferred from a log grep:
  * {@code aegis_events_ordered} (completed the pipeline),
- * {@code aegis_events_dropped_straggler} (arrived beyond window + grace) and
- * {@code aegis_events_dropped_overflow} (per-source buffer cap exceeded).
+ * {@code aegis_events_dropped_straggler} (arrived beyond window + grace),
+ * {@code aegis_events_dropped_overflow} (per-source buffer cap exceeded) and
+ * {@code aegis_events_dropped_sink} (a flush batch was already off the queues
+ * when the downstream stage threw).
  * A dashboard alert belongs on the drop ratio, not only on throughput.
  */
 @Component
@@ -50,6 +52,7 @@ public class IngestMetrics {
     private final Counter ordered;
     private final Counter stragglers;
     private final Counter overflow;
+    private final Counter sinkFailures;
 
     public IngestMetrics(MeterRegistry registry) {
         this.registry = registry;
@@ -60,6 +63,7 @@ public class IngestMetrics {
         this.ordered = registry.counter("aegis_events_ordered");
         this.stragglers = registry.counter("aegis_events_dropped_straggler");
         this.overflow = registry.counter("aegis_events_dropped_overflow");
+        this.sinkFailures = registry.counter("aegis_events_dropped_sink");
     }
 
     private static Timer timer(String name, MeterRegistry registry) {
@@ -102,5 +106,14 @@ public class IngestMetrics {
     /** An event was dropped because its source queue was full. */
     public void overflow() {
         overflow.increment();
+    }
+
+    /**
+     * A whole ordered batch was dropped because the downstream stage failed.
+     * Counted per event, not per batch, so it stays comparable with the other
+     * drop counters.
+     */
+    public void droppedBySink(int events) {
+        sinkFailures.increment(events);
     }
 }

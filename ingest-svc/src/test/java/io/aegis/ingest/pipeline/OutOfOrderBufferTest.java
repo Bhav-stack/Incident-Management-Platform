@@ -13,7 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -94,6 +96,29 @@ class OutOfOrderBufferTest {
         }
 
         assertEquals(3.0, metrics.counter("aegis_events_dropped_overflow").count());
+    }
+
+    @Test
+    void countsTheWholeBatchAsDroppedWhenTheSinkFails() {
+        OutOfOrderBuffer buffer = buffer();
+        Consumer<List<RawEvent>> failing = batch -> {
+            throw new IllegalStateException("downstream stage is down");
+        };
+        for (int i = 0; i < 3; i++) {
+            buffer.offer(event(START.plusSeconds(i), "s:1"), failing);
+        }
+
+        clock.advance(WINDOW.plusSeconds(3));
+
+        // A scheduled flush that throws loses the batch anyway (it is already
+        // off the queues), so the only question is whether the loss is visible.
+        assertDoesNotThrow(buffer::flush);
+        assertEquals(3.0, metrics.counter("aegis_events_dropped_sink").count());
+
+        // And it must stay lost: the watermark has passed, so requeueing would
+        // re-emit the same poison batch on every tick.
+        buffer.flush();
+        assertEquals(3.0, metrics.counter("aegis_events_dropped_sink").count());
     }
 
     @Test

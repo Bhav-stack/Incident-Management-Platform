@@ -117,7 +117,19 @@ public class OutOfOrderBuffer {
             }
         });
         if (!due.isEmpty()) {
-            sink.accept(due);
+            try {
+                sink.accept(due);
+            } catch (RuntimeException e) {
+                // The batch left the queues before the sink ran, so it cannot be
+                // requeued: its watermark has passed, which would re-emit it on
+                // every tick and turn a transient failure into a poison batch.
+                // Losing it silently is the one thing that is not allowed here,
+                // because "ordered" and the drop counters are supposed to add up
+                // to what the consumer received.
+                metrics.droppedBySink(due.size());
+                log.error("Ordered batch of {} events dropped: downstream failed: {}",
+                        due.size(), e.toString());
+            }
         }
     }
 
