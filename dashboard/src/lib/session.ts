@@ -11,6 +11,8 @@
 // credential, it expires in minutes, and it should not outlive the tab it was
 // obtained in or be shared with other tabs. Nothing else is persisted.
 
+import { apiUrl } from "./config";
+
 export interface OperatorSession {
   token: string;
   subject: string;
@@ -96,7 +98,7 @@ export function remainingSeconds(): number {
  * copy of it.
  */
 export async function signIn(operatorKey: string): Promise<OperatorSession> {
-  const res = await fetch("/api/auth/session", {
+  const res = await fetch(apiUrl("/api/auth/session"), {
     method: "POST",
     headers: { "X-Operator-Key": operatorKey },
   });

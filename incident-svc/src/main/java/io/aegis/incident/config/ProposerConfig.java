@@ -60,9 +60,15 @@ public class ProposerConfig {
         if (properties.fake()) {
             return FakeLlmClient.investigatingAgent();
         }
-        if (!StringUtils.hasText(properties.apiKey())) {
-            throw new IllegalStateException(
-                    "agent.mode=agent requires OPENAI_API_KEY or agent.fake=true");
+        // A key is only required by a hosted provider. A model on localhost or
+        // on the Compose network needs no credential, so refusing to start
+        // there would rule out the free configuration entirely.
+        if (!StringUtils.hasText(properties.apiKey()) && properties.hostedProvider()) {
+            throw new IllegalStateException("""
+                    agent.mode=agent against a hosted provider requires OPENAI_API_KEY.
+                    For a local model, set AGENT_BASE_URL to it instead (no key needed), e.g.
+                    AGENT_MODE=agent AGENT_BASE_URL=http://localhost:11434/v1 AGENT_MODEL=qwen2.5:7b
+                    Or use agent.fake=true to run the scripted agent in CI.""");
         }
         return new OpenAiLlmClient(properties.baseUrl(), properties.apiKey(),
                 properties.model(), properties.temperature());

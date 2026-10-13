@@ -1,0 +1,60 @@
+# Caddy: one hostname, automatic HTTPS, three routes.
+#
+# Caddy obtains and renews a real Let's Encrypt certificate for SITE_HOST using
+# an HTTP-01 challenge, which needs ports 80 and 443 reachable from the
+# internet. There is no certbot cron and no renewal script: this is the whole
+# configuration.
+#
+# Routing, in matcher order (first match wins, so the specific paths come
+# before the catch-all):
+#
+#   /api/*     REST control plane, proxied to incident-svc
+#   /ws*       STOMP/SockJS live feed, proxied to incident-svc (prefix, not
+#              /ws/*: SockJS requests /ws/info and then
+#              /ws/{server}/{session}/websocket, and the bare /ws must not fall
+#              through to the static handler)
+#   /grafana/* read-only Grafana. The prefix is NOT stripped, because Grafana is
+#              configured with serve_from_sub_path and emits absolute /grafana
+#              asset URLs
+#   *          the static landing page in site/
+#
+# Deliberately absent: a route for Prometheus. It has no authentication, so it
+# stays reachable only from inside the Compose network.
+#
+# WebSocket upgrades need no special handling here; reverse_proxy detects the
+# Upgrade header and tunnels the connection.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$SITE_HOST} {
+	encode zstd gzip
+
+	# Safe for a host that serves nothing but HTTPS.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	handle /api/* {
+		reverse_proxy incident-svc:8082
+	}
+
+	handle /ws* {
+		reverse_proxy incident-svc:8082
+	}
+
+	handle /grafana/* {
+		reverse_proxy grafana:3000
+	}
+
+	handle {
+		root * /srv/landing
+		file_server
+		# Headers only on the static page: a CSP that suits a hand-written HTML
+		# file would break Grafana's inline bootstrap script.
+		header {
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "strict-origin-when-cross-origin"
+			X-Frame-Options "DENY"
+		}
+	}
+}

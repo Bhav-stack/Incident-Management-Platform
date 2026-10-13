@@ -1,6 +1,7 @@
 import { Client, type IMessage } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { api } from "./api";
+import { wsUrl } from "./config";
 import type { IncidentStateEvent, ProposalMessage } from "./types";
 
 // Live feed client: STOMP over SockJS (the server endpoint registers both),
@@ -19,7 +20,7 @@ export interface LiveFeedHandlers {
 
 export function connectLiveFeed(handlers: LiveFeedHandlers): () => void {
   const client = new Client({
-    webSocketFactory: () => new SockJS("/ws"),
+    webSocketFactory: () => new SockJS(wsUrl()),
     reconnectDelay: 3000,
     beforeConnect: async () => {
       // A fresh ticket per attempt: the previous one was spent on connect.

@@ -1,11 +1,12 @@
 import type { Incident, Proposal, TimelineEvent } from "./types";
+import { apiUrl } from "./config";
 import { operatorToken } from "./session";
 
 // Thin REST client for incident-svc. The live feed arrives over STOMP; REST
 // is the replay/snapshot layer (initial list, detail, timeline, decisions).
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(apiUrl(path));
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -49,12 +50,12 @@ export const api = {
   // in that credential is their token; otherwise it is the proxy's shared key,
   // which is a client identity and cannot satisfy a two-person rule.
   approve: (proposalId: string) =>
-    fetch(`/api/proposals/${proposalId}/approve`, {
+    fetch(apiUrl(`/api/proposals/${proposalId}/approve`), {
       method: "POST",
       headers: decisionHeaders(),
     }),
   reject: (proposalId: string) =>
-    fetch(`/api/proposals/${proposalId}/reject`, {
+    fetch(apiUrl(`/api/proposals/${proposalId}/reject`), {
       method: "POST",
       headers: decisionHeaders(),
     }),
@@ -76,7 +77,7 @@ export const api = {
 };
 
 async function put(path: string, body: unknown): Promise<void> {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -85,7 +86,7 @@ async function put(path: string, body: unknown): Promise<void> {
 }
 
 async function postJson<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: "POST" });
+  const res = await fetch(apiUrl(path), { method: "POST" });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }

@@ -1,0 +1,26 @@
+# Prometheus scrape config for the containerised deployment.
+#
+# The only difference from ../observability/prometheus.yml is the target
+# addresses: here every service is a container on the same Compose network, so
+# they resolve by service name. The dev config scrapes via host.docker.internal
+# because there the Spring services run on the host.
+#
+# There are no rule files and no Alertmanager: alerting is P2 of the roadmap,
+# and pretending otherwise in comments would be worse than leaving it out.
+
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: simulator
+    static_configs:
+      - targets: ["simulator:8080"]
+
+  - job_name: ingest-svc
+    static_configs:
+      - targets: ["ingest-svc:8081"]
+
+  - job_name: incident-svc
+    static_configs:
+      - targets: ["incident-svc:8082"]

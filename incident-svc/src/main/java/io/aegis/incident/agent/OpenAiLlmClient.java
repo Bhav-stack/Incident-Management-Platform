@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.aegis.incident.config.OutboundHttp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,11 +29,28 @@ public class OpenAiLlmClient implements LlmClient {
     private final String model;
     private final double temperature;
 
+    /** Generous default: a local model on a CPU-only host is slow, not broken. */
+    private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration DEFAULT_READ_TIMEOUT = Duration.ofSeconds(60);
+
     public OpenAiLlmClient(String baseUrl, String apiKey, String model, double temperature) {
+        this(baseUrl, apiKey, model, temperature, DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT);
+    }
+
+    /**
+     * @param readTimeout how long to wait for a completion. There is deliberately
+     *                    no retry around this call: a timed-out completion may
+     *                    still be billed, the agent loop already bounds itself
+     *                    by rounds, and a caller that wants another attempt can
+     *                    make one with full knowledge of the cost. The timeout
+     *                    is what stops a silent peer from holding the proposer
+     *                    thread indefinitely.
+     */
+    public OpenAiLlmClient(String baseUrl, String apiKey, String model, double temperature,
+                           Duration connectTimeout, Duration readTimeout) {
         this.model = model;
         this.temperature = temperature;
-        this.rest = RestClient.builder()
-                .baseUrl(baseUrl)
+        this.rest = OutboundHttp.builder(baseUrl, connectTimeout, readTimeout)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .build();
     }

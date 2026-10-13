@@ -47,9 +47,62 @@ a style opinion.
 | D13 | Medium | **Nothing touches a real target.** Every signal comes from the simulator and every action goes back to it, so the "practical tool" claim rests on the simulator's realism. Real inputs (Alertmanager webhook), real approvals (Slack) and real actions (Kubernetes/Docker) are what turn this from a demo into something an SRE would deploy. | `simulator/` is the only event source; `SimulatorClient` the only action target | P7 |
 | D14 | Low-medium | **Scale-out and data lifecycle gaps.** WebSocket fan-out is single-instance (documented); no Schema Registry or contract tests (the shared module is compile-time coupling, not a wire contract); no chaos suite; no retention/archival policy for events, incidents or evaluations; no rate limiting on the control plane. | `WsConfig`, `contracts/`, migration set | P7 |
 
-## 2. Phase plan
+## 2. Locked decisions and the order of work
 
-### P1 — Correctness and blast radius (1–2 days)
+Decided on 2026-10-13 from the answers to the four open questions.
+
+| Decision | Choice | Consequence |
+|---|---|---|
+| Primary objective | Job-search demo with a live URL | A live URL is a deliverable, not a stretch goal, so it moves ahead of the deep observability work |
+| Host | One low-cost host, near zero cost | A single VPS runs the whole Compose stack; no managed services, no cloud-architecture detour |
+| Model | Free only, no paid API key | Ollama over its OpenAI-compatible endpoint, with the existing rule-based proposer as the documented degradation path |
+| Observability | Distributed tracing in scope | Tempo or Jaeger plus OTLP in Compose is the one optional technology kept |
+| Time | A few hours per week | Work is sized in sessions of three to four hours; every phase ends shippable on its own |
+| Out of near-term scope | Slack approvals, Kubernetes handlers, Schema Registry | They remain in P7 as optional; nothing else in the plan depends on them |
+
+**The model layer needs no new provider.** `agent.mode` already defaults to `rule`
+(the rule-based proposer) and `agent.base-url` is a first-class setting, so the
+free path is configuration rather than code: run Ollama locally, set
+`AGENT_MODE=llm` and `AGENT_BASE_URL=http://localhost:11434/v1` with a local model
+tag. The catalogue of supported services contains no hosted inference provider
+with a usable free tier, which settles the question. Two things are genuinely
+missing and belong in P0: a run is not attributed to a model version (the D8
+finding), and nothing in CI proves either proposer works end to end.
+
+### The order of work
+
+| Order | Phase | Why here | Sessions |
+|---|---|---|---|
+| 1 | P0 free model and repository floor | The demo must not depend on a paid key, and a public repository without a licence cannot legally be used by the person reading it | 1 |
+| 2 | P1 correctness and blast radius | A platform that can silently lose the incident is not credible at any level of polish | 2-3 |
+| 3 | P2a live URL | The objective is a link a recruiter can open, so it should exist early and then keep working | 1-2 |
+| 4 | P2b tracing, alerts, dead letters | The failure modes are bounded by now, so make them visible | 2 |
+| 5 | P3 detection depth | The engineering story: one fixed threshold is the weakest claim the project makes | 2-3 |
+| 6 | P4 operator console and frontend tests | Turns the dashboard from a viewer into a tool | 2 |
+| 7 | P6 portfolio surface | ADRs, refreshed audit, demo script, interviewer guide | 1 |
+| 8 | P7 real signals and actions | Optional: the part that would let a team adopt it | deferred |
+
+## 3. Phase detail
+
+### P0 — A free model and a usable repository (1 session)
+
+- **Make the local model the demo path.** Document and script Ollama, pin a model
+  tag, and set `AGENT_MODE=llm` with `AGENT_BASE_URL` pointed at it as the demo
+  default, while keeping the rule-based proposer as the stated fallback.
+- **Attribute every agent run** (D8): record model, prompt hash, temperature,
+  token usage and cost (zero locally) on the proposal, so any verdict can be
+  replayed and the two proposers can be compared honestly.
+- **Repository floor** (D11, the cheap half): `LICENSE`, `SECURITY.md`,
+  `.editorconfig`, Dependabot, a `CHANGELOG.md` seeded from the git history.
+- **Prove both proposers in CI**: the rule path and the model path against
+  `FakeLlmClient`, plus a test that an unreachable model degrades to the rule
+  path instead of erroring.
+
+*Done when:* a clone with no API key and no cloud account runs the full demo
+locally, an incident produces a proposal attributed to the local model, and
+stopping the model still produces a proposal that says why the agent was not used.
+
+### P1 — Correctness and blast radius (1–2 days, 2–3 sessions)
 
 The phases start here on purpose: an incident platform that can silently lose the
 incident is not credible no matter how good the dashboard looks.
@@ -185,22 +238,31 @@ minutes, and every claim in the README links to an artifact.
 *Done when:* a Chaos job in CI can kill a dependency and still show every event
 accounted for, and the README demo runs on a real signal from Alertmanager.
 
-## 3. Sequencing note
+## 4. Sequencing note
 
-P1 and P2 are not optional and should not be reordered behind the visible work:
-they are the difference between "a demo that works when nothing goes wrong" and
-"a system whose failure modes are known and bounded". P3 is where the engineering
-depth of the project actually lives, P4 and P5 make it demonstrable, P6 makes it
-readable, and P7 is the part that would let a real team adopt it.
+P0 and P1 come first and are not optional: P0 removes the paid dependency and
+puts a floor under the repository, and P1 is the difference between "a demo that
+works when nothing goes wrong" and "a system whose failure modes are known and
+bounded".
 
-## 4. What I need to proceed
+The one deliberate exception to the original ordering is the live URL. Because
+the objective is a link a recruiter opens, the deploy work is split: P2a (the
+whole stack on one host behind a one-command deploy) happens before the
+deep observability work in P2b, and the URL is expected to stay up from then on
+rather than being rebuilt at the end. P3 is where the engineering depth actually
+lives, P4 and P5 make it demonstrable, P6 makes it readable, and P7 is the part
+that would let a real team adopt it.
 
-1. **The primary objective** (job search demo with a live URL, engineering-depth
-   portfolio, or a tool you intend to run) — it changes the order of P5 and P7.
-2. **Resources**: an AWS/GCP account with a budget, an LLM API key (or
-   Ollama-only), a domain, a Slack workspace, and whether a Kubernetes cluster is
-   available.
-3. **Scope cut** for the optional technology in P2, P5 and P7 (tracing backend,
-   Terraform, Schema Registry, Slack, Kubernetes handlers).
-4. **Time budget** per week and any deadline, so the phases are sized to what can
-   actually be finished rather than started.
+## 5. Still needed from you
+
+1. **Host account.** Hetzner CX32 (about €7/month, the option that appears in the
+   service catalogue), Oracle Cloud Always Free ARM (genuinely zero cost, slower
+   signup), or a machine you already have? I need the choice, not credentials:
+   you paste an SSH key yourself and I write the deploy script around it.
+2. **A domain, or not.** A free `sslip.io`-style hostname gives you working HTTPS
+   with no purchase; a real domain reads better on a CV. Either is fine.
+3. **Where Ollama runs.** On your machine (simple, but the public demo cannot
+   reach it) or on the host (the demo can use it, but a small VPS does CPU
+   inference on a 3-7B quantised model and will be slow). The honest split, if
+   you do not want to decide now: local model for the local demo, and the public
+   URL showing the rule-based proposer with the agent path documented.

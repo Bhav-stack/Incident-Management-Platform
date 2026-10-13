@@ -7,7 +7,12 @@ COPY simulator ./simulator
 RUN ./gradlew :simulator:bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre
-RUN useradd --system --uid 10001 --create-home aegis
+# See Dockerfile.incident: the base image has no HTTP client, so a healthcheck
+# would have nothing to run.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 --create-home aegis
 WORKDIR /app
 COPY --from=build --chown=aegis:aegis \
      /src/simulator/build/libs/simulator-0.1.0-SNAPSHOT.jar /app/app.jar

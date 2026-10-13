@@ -1,0 +1,309 @@
+# Production stack: everything in containers, one public entry point.
+#
+#   cd deploy
+#   cp .env.prod.example .env      # then edit; see DEPLOY.md
+#   docker compose -f compose.prod.yml --env-file .env up -d --build
+#
+# Differences from the root docker-compose.yml (the local dev stack):
+#
+#   * the four services are built and run here, not on the host, so the whole
+#     system is one command on a machine with nothing installed but Docker;
+#   * only Caddy publishes ports. Kafka, Postgres, Redis, Prometheus and Grafana
+#     are reachable only from inside the Compose network, which is why the
+#     broker advertises itself as kafka:9092 and not localhost;
+#   * every container has an explicit memory ceiling. On the target host (2
+#     vCPU, 12 GB) the JVM default of a quarter of system RAM per process would
+#     over-commit three JVMs before Kafka starts. The ceilings add up to about
+#     8 GB, which leaves the page cache and the OS room to work;
+#   * startup is health-gated: services wait for their dependencies to answer,
+#     not merely to exist.
+#
+# The dashboard is NOT here. It is a static bundle served by Vercel for free;
+# this host serves the API it calls, plus Grafana and the landing page.
+
+name: aegis
+
+# Shared defaults. Anchors keep the YAML honest: every service gets the same
+# restart policy, log ceiling and JVM tuning instead of each one drifting.
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# JVM tuning for a small container: leave heap proportional to the container
+# limit rather than to the whole machine, fail loudly instead of thrashing, and
+# keep metaspace from growing without bound.
+x-java-env: &java-env
+  JAVA_TOOL_OPTIONS: >-
+    -XX:MaxRAMPercentage=60
+    -XX:MaxMetaspaceSize=192m
+    -XX:+ExitOnOutOfMemoryError
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:HeapDumpPath=/tmp
+    -Duser.timezone=UTC
+
+services:
+  kafka:
+    <<: *service-defaults
+    image: apache/kafka:3.7.0
+    # No ports: publishing 9092 would expose an unauthenticated broker to the
+    # internet. Everything that needs Kafka is on this network already.
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      # The service name, not localhost: this is what broker metadata returns to
+      # the other containers, and a client given "localhost" would connect to
+      # itself.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # A demo does not need a week of retention; this bounds disk on a host
+      # whose block volume is shared with the images and the Postgres data.
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_HEAP_OPTS: "-Xmx768m -Xms256m"
+    mem_limit: 2g
+    cpus: "0.8"
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  postgres:
+    <<: *service-defaults
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Keeps a first-run initdb on a small box predictable.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    mem_limit: 1g
+    cpus: "0.6"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates aegis_ingest. Runs only on an empty data directory, which is
+      # exactly once, on the first boot.
+      - ../postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegis} -d ${POSTGRES_DB:-aegis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  redis:
+    <<: *service-defaults
+    image: redis:7
+    # Dedup keys are deliberately short-lived (1h TTL) and rebuilding the cache
+    # costs nothing but duplicate suppression, so persistence is off: no AOF
+    # rewrite competing for the disk with Postgres.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 384m
+    cpus: "0.3"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  simulator:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.simulator
+    environment:
+      <<: *java-env
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AEGIS_API_KEY: ${AEGIS_API_KEY:?set AEGIS_API_KEY in .env}
+      SIMULATOR_SERVICES: ${SIMULATOR_SERVICES:-checkout-service,payment-service,search-service}
+      # Self-driving demo: injects a fault on a schedule so a visitor who opens
+      # the link at a random moment finds a live incident instead of an empty
+      # board. Set to false to drive faults only from the scenario API.
+      SIMULATOR_DEMO_ENABLED: ${SIMULATOR_DEMO_ENABLED:-true}
+      SIMULATOR_DEMO_INTERVAL_SECONDS: ${SIMULATOR_DEMO_INTERVAL_SECONDS:-180}
+      SIMULATOR_DEMO_DURATION_SECONDS: ${SIMULATOR_DEMO_DURATION_SECONDS:-90}
+    mem_limit: 768m
+    cpus: "0.5"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  ingest-svc:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.ingest
+    environment:
+      <<: *java-env
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_INGEST_DB:-aegis_ingest}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      REDIS_HOST: redis
+      # The consumer group's partitions come from the topic, so the queue cap
+      # does not need to hold a laptop's throughput: the public demo runs a
+      # fraction of it. See DEPLOY.md for the rate this host sustains.
+      INGEST_MAX_QUEUE_SIZE: ${INGEST_MAX_QUEUE_SIZE:-5000}
+    mem_limit: 1g
+    cpus: "0.8"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  incident-svc:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.incident
+    environment:
+      <<: *java-env
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # In-network, so the action and verification calls never leave the host.
+      SIMULATOR_BASE_URL: http://simulator:8080
+      AEGIS_API_KEY: ${AEGIS_API_KEY:?set AEGIS_API_KEY in .env}
+      # Two named operators make a two-person approval possible. For a public
+      # demo these keys are intentionally published on the landing page: they
+      # can approve simulated recoveries on a simulated service and nothing
+      # else. Rotate them in .env to make the demo single-tenant again.
+      AEGIS_OPERATOR_1_NAME: ${AEGIS_OPERATOR_1_NAME:-demo-oncall-primary}
+      AEGIS_OPERATOR_1_KEY: ${AEGIS_OPERATOR_1_KEY:?set AEGIS_OPERATOR_1_KEY in .env}
+      AEGIS_OPERATOR_2_NAME: ${AEGIS_OPERATOR_2_NAME:-demo-oncall-secondary}
+      AEGIS_OPERATOR_2_KEY: ${AEGIS_OPERATOR_2_KEY:?set AEGIS_OPERATOR_2_KEY in .env}
+      AEGIS_JWT_ISSUER: ${AEGIS_JWT_ISSUER:?set AEGIS_JWT_ISSUER in .env}
+      AEGIS_JWT_SECRET: ${AEGIS_JWT_SECRET:?set AEGIS_JWT_SECRET in .env}
+      # The dashboard runs on Vercel, so its origin must be allowed. This is the
+      # only cross-origin client; everything else is same-origin behind Caddy.
+      AEGIS_CORS_ORIGINS: ${AEGIS_CORS_ORIGINS:?set AEGIS_CORS_ORIGINS in .env}
+      # MEDIUM on a hosted demo so an ordinary restart still needs two
+      # signatures, which is the interesting path to show a visitor.
+      POLICY_TWOPERSONLEVELS: ${POLICY_TWOPERSONLEVELS:-MEDIUM}
+    mem_limit: 1g
+    cpus: "0.8"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      simulator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+  prometheus:
+    <<: *service-defaults
+    image: prom/prometheus:v2.53.0
+    # No ports: the expression browser can read every metric and the scrape
+    # targets, and it has no authentication. It is for the dashboard inside the
+    # network, not for the internet.
+    volumes:
+      - ../observability/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    mem_limit: 768m
+    cpus: "0.4"
+    depends_on:
+      simulator:
+        condition: service_started
+      ingest-svc:
+        condition: service_started
+      incident-svc:
+        condition: service_started
+
+  grafana:
+    <<: *service-defaults
+    image: grafana/grafana:11.1.0
+    environment:
+      # Anonymous viewers make the observability story shareable: a reviewer can
+      # open the dashboard without an account and cannot change anything.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?set GRAFANA_PASSWORD in .env}
+      # Grafana is reached at https://host/grafana/, behind Caddy, so it has to
+      # be told it lives under a sub-path or every asset URL it emits 404s.
+      GF_SERVER_ROOT_URL: ${SITE_SCHEME:-https}://${SITE_HOST:?set SITE_HOST in .env}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    mem_limit: 512m
+    cpus: "0.3"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+
+  caddy:
+    <<: *service-defaults
+    image: caddy:2.8-alpine
+    # The only service with published ports, and the only one that terminates
+    # TLS. Certificates are issued and renewed automatically for SITE_HOST.
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_HOST: ${SITE_HOST:?set SITE_HOST in .env}
+      SITE_SCHEME: ${SITE_SCHEME:-https}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    mem_limit: 128m
+    cpus: "0.2"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../site:/srv/landing:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      incident-svc:
+        condition: service_started
+      grafana:
+        condition: service_started
+
+volumes:
+  pgdata:
+  kafkadata:
+  promdata:
+  grafanadata:
+  caddydata:
+  caddyconfig:

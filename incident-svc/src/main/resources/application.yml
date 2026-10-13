@@ -55,7 +55,11 @@ policy:
   # Risk levels that need two distinct verified operators to approve. The
   # requirement is captured on the proposal when it is created, so relaxing
   # this later cannot retroactively weaken a decision already taken.
-  two-person-levels: HIGH
+  # Overridable so a hosted demo can lower the bar to MEDIUM: a normal restart
+  # then still needs two signatures, while the deliberately stubborn scenario
+  # keeps exercising rollback. The requirement is captured per proposal, so
+  # relaxing it later cannot weaken a decision already taken.
+  two-person-levels: ${POLICY_TWOPERSONLEVELS:HIGH}
 
 # Replay harness ground truth (Phase 5b): demo scenarios the shadow
 # evaluator scores the proposer against. no_action is the negative class.
@@ -123,9 +127,23 @@ aegis:
       # it mints a token for the shared client credential.
       attributable-claim: aegis_attributable
 
-# Action execution and verification
+  # Origins allowed to call the control plane from a browser. Empty means
+  # same-origin only. Set this to the dashboard's URL when the dashboard is
+  # hosted separately (Vercel, or a dev server against a remote API): without
+  # it the browser's preflight gets no CORS header and every approve fails
+  # before it is sent.
+  cors:
+    allowed-origins: ${AEGIS_CORS_ORIGINS:}
+
+# Action execution and verification.
+# The timeouts exist so a silent or wedged simulator cannot hold the executor
+# thread while it is inside a transaction, or stall the verifier's polling
+# window. Without them the JDK client waits forever, retries never fire, and the
+# dashboard simply stops updating with nothing in the logs to explain why.
 simulator:
   base-url: ${SIMULATOR_BASE_URL:http://localhost:8080}
+  connect-timeout: ${SIMULATOR_CONNECT_TIMEOUT:2s}
+  read-timeout: ${SIMULATOR_READ_TIMEOUT:5s}
 action:
   verify-window: 60s       # how long metrics may take to recover
   verify-poll-interval: 10s
