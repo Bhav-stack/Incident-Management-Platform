@@ -11,7 +11,7 @@ import OperatorSession from "./OperatorSession";
 // Approval window shown to the operator. Mirrors proposal.ttl on the backend
 // (5 minutes); the backend remains the source of truth for expiry.
 const PROPOSAL_TTL_MS = 5 * 60_000;
-
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== "false";
 /** True while a high-risk action is still short of its required signatures. */
 function needsSecondSignature(proposal: Proposal): boolean {
   const required = proposal.approvalsRequired ?? 1;
@@ -53,31 +53,38 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
 
   const shownTrace = trace.length > 0 ? trace : live ? [] : sampleTrace;
 
-  const decide = async (approve: boolean) => {
-    if (!proposal || proposal.status !== "PENDING") return;
-    setBusy(true);
-    try {
-      const res = approve
-        ? await api.approve(proposal.externalId)
-        : await api.reject(proposal.externalId);
-      setDecision(
-        res.ok
-          ? {
-              ok: true,
-              text: approve
-                ? needsSecondSignature(proposal)
-                  ? `Signature recorded · proposal ${proposal.externalId} still needs a second operator`
-                  : `Approved · proposal ${proposal.externalId} queued for execution`
-                : `Rejected · proposal ${proposal.externalId} closed`,
-            }
-          : { ok: false, text: await decisionError(res) },
-      );
-    } catch {
-      setDecision({ ok: false, text: "Decision failed. Is incident-svc reachable?" });
-    } finally {
-      setBusy(false);
-    }
-  };
+
+const decide = async (approve: boolean) => {
+  if (DEMO_MODE || !proposal || proposal.status !== "PENDING") return;
+
+  setBusy(true);
+  try {
+    const res = approve
+      ? await api.approve(proposal.externalId)
+      : await api.reject(proposal.externalId);
+
+    setDecision(
+      res.ok
+        ? {
+            ok: true,
+            text: approve
+              ? needsSecondSignature(proposal)
+                ? `Signature recorded · proposal ${proposal.externalId} still needs a second operator`
+                : `Approved · proposal ${proposal.externalId} queued for execution`
+              : `Rejected · proposal ${proposal.externalId} closed`,
+          }
+        : { ok: false, text: await decisionError(res) },
+    );
+  } catch {
+    setDecision({
+      ok: false,
+      text: "Decision failed. Is incident-svc reachable?",
+    });
+  } finally {
+    setBusy(false);
+  }
+};
+
 
   const ttlDeadline = proposal
     ? new Date(proposal.createdAt).getTime() + PROPOSAL_TTL_MS
@@ -201,23 +208,45 @@ export default function DetailView({ incident, timeline, proposal, trace, live, 
                     : "Reasoning recorded on the proposal is not available; see the evidence chips above."}
                 </div>
 
-                {proposal.status === "PENDING" && (
-                  <>
-                    <div className="ttl">
-                      <div className="lbl">Approval window</div>
-                      <div className="num">{countdown(ttlDeadline, now)}</div>
-                    </div>
-                    {/* The signature is a person's, so the person signs in
-                        here. Without a token the proxy's shared key signs
-                        instead, which is enough for one signature and not for
-                        two. */}
-                    <OperatorSession variant="panel" />
-                    <div className="btn-row">
-                      <button className="btn approve" disabled={busy} onClick={() => void decide(true)}><CheckIcon /> Approve</button>
-                      <button className="btn reject" disabled={busy} onClick={() => void decide(false)}><XIcon /> Reject</button>
-                    </div>
-                  </>
-                )}
+
+{proposal.status === "PENDING" && (
+  <>
+    <div className="ttl">
+      <div className="lbl">Approval window</div>
+      <div className="num">{countdown(ttlDeadline, now)}</div>
+    </div>
+
+    {DEMO_MODE ? (
+      <div className="sample-note warn">
+        DEMO MODE · Approval and rejection are disabled.
+        No live action will be executed.
+      </div>
+    ) : (
+      <>
+        <OperatorSession variant="panel" />
+
+        <div className="btn-row">
+          <button
+            className="btn approve"
+            disabled={busy}
+            onClick={() => void decide(true)}
+          >
+            <CheckIcon /> Approve
+          </button>
+
+          <button
+            className="btn reject"
+            disabled={busy}
+            onClick={() => void decide(false)}
+          >
+            <XIcon /> Reject
+          </button>
+        </div>
+      </>
+    )}
+  </>
+)}
+
                 {decision && (
                   <div className={`decision-msg ${decision.ok ? "" : "err"}`}>{decision.text}</div>
                 )}
