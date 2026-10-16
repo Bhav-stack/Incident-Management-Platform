@@ -143,23 +143,27 @@ public class ControlPlaneAuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Bearer token, then operator key, then shared key. The order is the
-     * authority order: a credential that names a person outranks one that
-     * names a client.
+     * Bearer token, then operator key, then shared key. If a bearer token is
+     * supplied, it must validate; it must never fall back to another credential.
      */
     private Optional<OperatorRegistry.Identity> resolve(HttpServletRequest request) {
-        if (jwt != null) {
-            String header = request.getHeader(AUTHORIZATION);
-            if (header != null && header.regionMatches(true, 0, BEARER_PREFIX, 0,
-                    BEARER_PREFIX.length())) {
-                return jwt.authenticate(header.substring(BEARER_PREFIX.length()).trim());
+        String header = request.getHeader(AUTHORIZATION);
+
+        if (header != null && header.regionMatches(
+                true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
+            if (jwt == null) {
+                return Optional.empty();
             }
+            return jwt.authenticate(
+                    header.substring(BEARER_PREFIX.length()).trim());
         }
+
         Optional<OperatorRegistry.Identity> operator =
                 operators.authenticateNamed(request.getHeader(OPERATOR_HEADER));
         if (operator.isPresent()) {
             return operator;
         }
+
         return operators.authenticate(request.getHeader(HEADER));
     }
 }

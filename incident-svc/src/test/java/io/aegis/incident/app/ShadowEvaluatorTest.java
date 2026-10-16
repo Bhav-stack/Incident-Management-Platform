@@ -84,7 +84,7 @@ class ShadowEvaluatorTest {
     void statsReadTheQueryColumnsAsTpFpFnTnTotal() {
         EvaluationRepository repo = mock(EvaluationRepository.class);
         // 1 tp, 2 fp, 3 fn, 4 tn, 10 rows: precision 1/3, recall 1/4, correct 5.
-        when(repo.verdictCounts()).thenReturn(new long[] {1, 2, 3, 4, 10});
+        when(repo.verdictCounts()).thenReturn(java.util.List.<Object[]>of(new Object[] {1L, 2L, 3L, 4L, 10L}));
         ShadowEvaluator evaluator = new ShadowEvaluator(mock(Proposer.class), repo,
                 new ReplayProperties(List.of()));
 
@@ -103,7 +103,7 @@ class ShadowEvaluatorTest {
     void correctNoActionVerdictsDoNotInflatePrecisionOrRecall() {
         EvaluationRepository repo = mock(EvaluationRepository.class);
         // 4 tp, no fp, 1 fn, 1 tn: precision is 1.0 and recall 0.8, not 5/6.
-        when(repo.verdictCounts()).thenReturn(new long[] {4, 0, 1, 1, 6});
+        when(repo.verdictCounts()).thenReturn(java.util.List.<Object[]>of(new Object[] {4L, 0L, 1L, 1L, 6L}));
         ShadowEvaluator evaluator = new ShadowEvaluator(mock(Proposer.class), repo,
                 new ReplayProperties(List.of()));
 

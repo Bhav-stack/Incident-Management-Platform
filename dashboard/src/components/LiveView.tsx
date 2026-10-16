@@ -38,9 +38,12 @@ export default function LiveView({ incidents, live, loading = false, onSelect }:
         <div className="stats">
           {stats.map((s) => (
             <div className="stat" key={s.label}>
-              <div className="label">{s.label}</div>
-              <div className="value">{s.value}</div>
-              <div className={`delta ${s.tone}`}>{s.delta}</div>
+              <div className="label">
+  {s.label}
+  {!live && <span className="demo-badge">DEMO</span>}
+</div>
+<div className="value">{s.value}</div>
+<div className={`delta ${s.tone}`}>{s.delta}</div>
             </div>
           ))}
         </div>
